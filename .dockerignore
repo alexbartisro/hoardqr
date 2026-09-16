@@ -1,0 +1,6 @@
+web/node_modules
+web/build
+web/.svelte-kit
+pgdata
+uploads
+.git

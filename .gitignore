@@ -4,12 +4,6 @@
 *.exe
 *.test
 
-# Node / SvelteKit
-web/node_modules/
-web/build/
-web/.svelte-kit/
-web/dist/
-
 # Env
 .env
 .env.local
