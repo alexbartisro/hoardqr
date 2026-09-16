@@ -1,0 +1,47 @@
+services:
+  hoardqr:
+    build: .
+    container_name: hoardqr
+    command: ["serve"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://hoardqr:${DB_PASSWORD}@hoardqr-db:5432/hoardqr
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
+      SESSION_SECRET: ${SESSION_SECRET}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./uploads:/data/uploads
+    depends_on:
+      hoardqr-db:
+        condition: service_healthy
+
+  hoardqr-mcp:
+    build: .
+    container_name: hoardqr-mcp
+    command: ["mcp"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://hoardqr:${DB_PASSWORD}@hoardqr-db:5432/hoardqr
+      MCP_API_TOKEN: ${MCP_API_TOKEN}
+    ports:
+      - "8081:8081"
+    depends_on:
+      hoardqr-db:
+        condition: service_healthy
+
+  hoardqr-db:
+    image: postgres:16-alpine
+    container_name: hoardqr-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hoardqr
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: hoardqr
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hoardqr"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

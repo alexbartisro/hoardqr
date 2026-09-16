@@ -1,0 +1,8 @@
+{
+  "name": "hoardqr-web",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "build": "mkdir -p build && cp index.html build/index.html"
+  }
+}
