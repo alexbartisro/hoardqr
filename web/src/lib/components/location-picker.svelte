@@ -12,8 +12,14 @@
 
 	let {
 		locationId = $bindable<number | null>(null),
-		breadcrumb = $bindable<string>('')
-	}: { locationId?: number | null; breadcrumb?: string } = $props();
+		breadcrumb = $bindable<string>(''),
+		optional = false
+	}: { locationId?: number | null; breadcrumb?: string; optional?: boolean } = $props();
+
+	// `locationId === null` is ambiguous on its own — "not chosen yet" and "no
+	// parent, by choice" (Add Storage's root-level case, §8) are different states
+	// that need different UI. This tracks the latter explicitly.
+	let skipped = $state(false);
 
 	let tab = $state<'type' | 'scan' | 'ocr'>('type');
 
@@ -73,6 +79,7 @@
 		breadcrumb = path.map((p) => p.name).join(' > ');
 		resolveError = null;
 		pickerItems = null;
+		skipped = false;
 	}
 
 	async function selectSuggestion(s: SearchSuggestion) {
@@ -218,6 +225,11 @@
 				Change
 			</Button>
 		</div>
+	{:else if skipped}
+		<div class="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+			<span class="text-muted-foreground">No parent — root level</span>
+			<Button variant="ghost" size="sm" onclick={() => (skipped = false)}>Choose instead</Button>
+		</div>
 	{:else}
 		<Tabs.Root value={tab} onValueChange={(v) => switchTab(v as typeof tab)}>
 			<Tabs.List>
@@ -269,6 +281,16 @@
 				{#if ocrError}<p class="text-destructive text-sm">{ocrError}</p>{/if}
 			</Tabs.Content>
 		</Tabs.Root>
+
+		{#if optional}
+			<button
+				type="button"
+				class="text-muted-foreground self-start text-sm underline-offset-2 hover:underline"
+				onclick={() => (skipped = true)}
+			>
+				No parent — leave at root level
+			</button>
+		{/if}
 
 		{#if pickerItems}
 			<div class="flex flex-col gap-1 rounded-md border p-2">

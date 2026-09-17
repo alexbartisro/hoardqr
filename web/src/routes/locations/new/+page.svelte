@@ -1,0 +1,65 @@
+<script lang="ts">
+	// Add Storage flow (architecture plan §8): Location Picker here sets an optional
+	// parent (a root-level location like "Balcony" has none). Code/label assignment
+	// is deferred to editing after creation (step 4.5 — printable label sheet).
+	import { goto } from '$app/navigation';
+	import { createLocation } from '$lib/api';
+	import LocationPicker from '$lib/components/location-picker.svelte';
+	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
+	import * as Card from '$lib/components/ui/card';
+
+	let parentId = $state<number | null>(null);
+	let breadcrumb = $state('');
+
+	let name = $state('');
+	let submitting = $state(false);
+	let error = $state<string | null>(null);
+
+	function resetForm() {
+		// See the same reset in items/new — a second add in one session shouldn't
+		// start pre-filled with the previous location's data.
+		parentId = null;
+		breadcrumb = '';
+		name = '';
+	}
+
+	async function submit() {
+		if (!name.trim()) return;
+		submitting = true;
+		error = null;
+		try {
+			await createLocation({ name: name.trim(), parent_id: parentId });
+			resetForm();
+			// TODO(step 4.3): redirect to the new location's contents page once it exists.
+			await goto('/');
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to create location.';
+		} finally {
+			submitting = false;
+		}
+	}
+</script>
+
+<div class="flex flex-col gap-6">
+	<h1 class="text-xl font-semibold">Add Storage</h1>
+
+	<Card.Root variant="glass" class="p-4">
+		<LocationPicker bind:locationId={parentId} bind:breadcrumb optional />
+	</Card.Root>
+
+	<Card.Root variant="glass" class="p-4">
+		<Card.Content class="flex flex-col gap-4 p-0">
+			<div class="flex flex-col gap-1.5">
+				<label for="name" class="text-sm font-medium">Name</label>
+				<Input id="name" bind:value={name} placeholder="e.g. Storage Cabinet" />
+			</div>
+
+			{#if error}<p class="text-destructive text-sm">{error}</p>{/if}
+
+			<Button onclick={submit} disabled={submitting || !name.trim()}>
+				{submitting ? 'Creating…' : 'Add Storage'}
+			</Button>
+		</Card.Content>
+	</Card.Root>
+</div>
