@@ -25,6 +25,7 @@ const users = structuredClone(USERS);
 
 let nextLocationId = Math.max(...locations.map((l) => l.id)) + 1;
 let nextItemId = Math.max(...items.map((i) => i.id)) + 1;
+let nextTagId = Math.max(...tags.map((t) => t.id)) + 1;
 
 /**
  * Simulates network latency so loading states get exercised during Phase 2, and —
@@ -211,6 +212,22 @@ export async function getRecentItems(
 // needs a full tag list for selection; add this route for real in Phase 3. ---
 export async function getTags(): Promise<Tag[]> {
 	return delay(tags);
+}
+
+// --- POST /api/tags — also not in §9's table. Backs the Add Object tag
+// autocomplete's create-if-missing behavior: typing a name with no existing
+// match creates and persists it instead of just attaching a string to the one
+// item. Idempotent by case-insensitive name so a duplicate request (e.g. the
+// same new tag typed on two drafts) returns the tag already created rather
+// than erroring or creating a second row — real endpoint should upsert the
+// same way, matching Postgres's likely case-insensitive unique index on name.
+export async function createTag(name: string): Promise<Tag> {
+	const trimmed = name.trim();
+	const existing = tags.find((t) => t.name.toLowerCase() === trimmed.toLowerCase());
+	if (existing) return delay(existing);
+	const tag: Tag = { id: nextTagId++, name: trimmed };
+	tags.push(tag);
+	return delay(tag);
 }
 
 // --- GET /api/items/:id — not in §9's table, but the item detail page (Phase 2 step

@@ -4,7 +4,7 @@
 	// Everything else is optional at creation, editable later.
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { createItem, getLocation, getTags } from '$lib/api';
+	import { createItem, createTag, getLocation, getTags } from '$lib/api';
 	import type { Tag } from '$lib/types';
 	import LocationPicker from '$lib/components/location-picker.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -43,11 +43,21 @@
 		quantity: number;
 		description: string;
 		tags: Set<string>;
+		tagQuery: string;
+		tagOpen: boolean;
 	};
 
 	let draftSeq = 0;
 	function makeDraft(): Draft {
-		return { id: draftSeq++, name: '', quantity: 1, description: '', tags: new Set() };
+		return {
+			id: draftSeq++,
+			name: '',
+			quantity: 1,
+			description: '',
+			tags: new Set(),
+			tagQuery: '',
+			tagOpen: false
+		};
 	}
 
 	// Captured from the plain object before it's wrapped in $state below, not
@@ -74,6 +84,64 @@
 		if (next.has(tagName)) next.delete(tagName);
 		else next.add(tagName);
 		draft.tags = next;
+	}
+
+	// Empty query still returns a slice of allTags (not []) so focusing the
+	// field shows what already exists — the point of adding a text field was
+	// to add search on top of browsing, not to replace browsing with it.
+	function tagSuggestions(draft: Draft): Tag[] {
+		const q = draft.tagQuery.trim().toLowerCase();
+		return allTags
+			.filter((t) => !draft.tags.has(t.name) && t.name.toLowerCase().includes(q))
+			.slice(0, 6);
+	}
+
+	function hasExactTagMatch(draft: Draft): boolean {
+		const q = draft.tagQuery.trim().toLowerCase();
+		return allTags.some((t) => t.name.toLowerCase() === q);
+	}
+
+	function selectTag(draft: Draft, tag: Tag) {
+		const next = new Set(draft.tags);
+		next.add(tag.name);
+		draft.tags = next;
+		draft.tagQuery = '';
+	}
+
+	// Typing a brand-new name and confirming it (Enter, or the "Create" option)
+	// persists it via createTag rather than just attaching a bare string to this
+	// item — otherwise the tag wouldn't exist for autocomplete on the next draft
+	// or the next visit to this page.
+	async function confirmTag(draft: Draft) {
+		const trimmed = draft.tagQuery.trim();
+		if (!trimmed) return;
+		const existing = allTags.find((t) => t.name.toLowerCase() === trimmed.toLowerCase());
+		if (existing) {
+			selectTag(draft, existing);
+			return;
+		}
+		const created = await createTag(trimmed);
+		allTags = [...allTags, created];
+		selectTag(draft, created);
+	}
+
+	function handleTagKeydown(e: KeyboardEvent, draft: Draft) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			confirmTag(draft);
+		} else if (e.key === 'Escape') {
+			draft.tagOpen = false;
+		}
+	}
+
+	// Same reasoning as search-bar.svelte's handleFocusOut (see CLAUDE.md): a
+	// plain onblur would close this before a click on a suggestion button
+	// registers, breaking keyboard use entirely. Only close when focus leaves
+	// the input+dropdown container, not when it moves within it.
+	function handleTagFocusOut(e: FocusEvent, draft: Draft) {
+		if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) {
+			draft.tagOpen = false;
+		}
 	}
 
 	function addMore() {
@@ -206,25 +274,60 @@
 							></textarea>
 						</div>
 
-						{#if allTags.length > 0}
-							<div class="flex flex-col gap-1.5">
-								<span class="text-sm font-medium">Tags</span>
+						<div class="flex flex-col gap-1.5">
+							<label for={`tag-${draft.id}`} class="text-sm font-medium">Tags</label>
+							{#if draft.tags.size > 0}
 								<div class="flex flex-wrap gap-2">
-									{#each allTags as t (t.id)}
+									{#each [...draft.tags] as tagName (tagName)}
 										<button
 											type="button"
-											class={cn(
-												'rounded-full border px-3 py-1 text-sm',
-												draft.tags.has(t.name) ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
-											)}
-											onclick={() => toggleTag(draft, t.name)}
+											class="bg-primary text-primary-foreground flex items-center gap-1 rounded-full px-3 py-1 text-sm"
+											onclick={() => toggleTag(draft, tagName)}
 										>
-											{t.name}
+											{tagName}
+											<span aria-hidden="true">×</span>
 										</button>
 									{/each}
 								</div>
+							{/if}
+							<div class="relative" onfocusout={(e) => handleTagFocusOut(e, draft)}>
+								<Input
+									id={`tag-${draft.id}`}
+									placeholder="Type to find or create a tag…"
+									bind:value={draft.tagQuery}
+									onfocus={() => (draft.tagOpen = true)}
+									onkeydown={(e) => handleTagKeydown(e, draft)}
+								/>
+								{#if draft.tagOpen}
+									<div class="glass-panel absolute top-full left-0 z-20 mt-1 w-full rounded-md p-1">
+										<ul class="flex flex-col gap-0.5">
+											{#each tagSuggestions(draft) as t (t.id)}
+												<li>
+													<button
+														type="button"
+														class="hover:bg-accent w-full rounded-md px-2 py-1.5 text-left text-sm"
+														onclick={() => selectTag(draft, t)}
+													>
+														{t.name}
+													</button>
+												</li>
+											{/each}
+											{#if draft.tagQuery.trim() && !hasExactTagMatch(draft)}
+												<li>
+													<button
+														type="button"
+														class="hover:bg-accent w-full rounded-md px-2 py-1.5 text-left text-sm"
+														onclick={() => confirmTag(draft)}
+													>
+														+ Create "{draft.tagQuery.trim()}"
+													</button>
+												</li>
+											{/if}
+										</ul>
+									</div>
+								{/if}
 							</div>
-						{/if}
+						</div>
 					</div>
 				{/each}
 
