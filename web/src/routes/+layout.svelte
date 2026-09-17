@@ -1,14 +1,22 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import './layout.css';
-	import favicon from '$lib/assets/favicon.svg';
 	import SearchBar from '$lib/components/search-bar.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import ScanLine from '@lucide/svelte/icons/scan-line';
 
 	let { children } = $props();
+
+	onMount(() => {
+		if ('serviceWorker' in navigator) {
+			// Registration rejects outside a secure context (plain http:// on a LAN
+			// IP, e.g.) — expected there, not an error worth surfacing to the user.
+			navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+		}
+	});
 </script>
 
-<svelte:head><link rel="icon" href={favicon} /></svelte:head>
+<svelte:head><link rel="icon" href="/icons/icon-192.png" /></svelte:head>
 
 <div class="flex min-h-screen flex-col">
 	<header
