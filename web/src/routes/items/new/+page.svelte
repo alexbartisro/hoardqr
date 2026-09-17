@@ -12,6 +12,14 @@
 	import * as Card from '$lib/components/ui/card';
 	import { cn } from '$lib/utils';
 
+	// Item.condition (types.ts) is plain `string | null` — no DB-level enum
+	// (architecture plan §3's `condition TEXT` column has none either) — so
+	// this is a frontend-only convenience list, not a constraint the backend
+	// will enforce. Free text was tried first and swapped for this per
+	// feedback 2026-09-17: a handful of consistent values beats everyone
+	// typing their own wording for the same thing.
+	const CONDITIONS = ['new', 'good', 'fair', 'poor'];
+
 	// Arrives from /scan's "no match — create here" outcome (§6): the scanned
 	// code becomes this item's qr_token instead of generating a new one. Captured
 	// once (not $derived) — this route never remounts on a successful create (it
@@ -42,6 +50,13 @@
 		name: string;
 		quantity: number;
 		description: string;
+		// Kept as raw input strings, not Item's typed condition/purchase_date/
+		// purchase_price — these are optional (architecture plan §8: everything
+		// but location is optional at creation), so '' is "not set" and parsed
+		// to null/number only at submit time rather than forcing a default.
+		condition: string;
+		purchaseDate: string;
+		purchasePrice: string;
 		tags: Set<string>;
 		tagQuery: string;
 		tagOpen: boolean;
@@ -54,6 +69,9 @@
 			name: '',
 			quantity: 1,
 			description: '',
+			condition: '',
+			purchaseDate: '',
+			purchasePrice: '',
 			tags: new Set(),
 			tagQuery: '',
 			tagOpen: false
@@ -171,12 +189,17 @@
 		try {
 			const created = [];
 			for (const draft of toCreate) {
+				const priceInput = draft.purchasePrice.trim();
+				const parsedPrice = Number(priceInput);
 				created.push(
 					await createItem({
 						name: draft.name.trim(),
 						location_id: targetLocationId,
 						quantity: Number(draft.quantity) || 1,
 						description: draft.description.trim() || null,
+						condition: draft.condition.trim() || null,
+						purchase_date: draft.purchaseDate || null,
+						purchase_price: priceInput && !Number.isNaN(parsedPrice) ? parsedPrice : null,
 						tags: [...draft.tags],
 						// One physical scan corresponds to one physical object, even
 						// when several different objects are stored in the same visit
@@ -272,6 +295,37 @@
 								rows="3"
 								class="border-input focus-visible:border-ring focus-visible:ring-ring/50 rounded-md border bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:ring-3"
 							></textarea>
+						</div>
+
+						<div class="flex flex-col gap-1.5">
+							<label for={`condition-${draft.id}`} class="text-sm font-medium">Condition</label>
+							<select
+								id={`condition-${draft.id}`}
+								bind:value={draft.condition}
+								class="border-input focus-visible:border-ring focus-visible:ring-ring/50 h-9 rounded-md border bg-transparent px-2.5 text-sm outline-none focus-visible:ring-3"
+							>
+								<option value="">Not set</option>
+								{#each CONDITIONS as c (c)}
+									<option value={c}>{c[0].toUpperCase() + c.slice(1)}</option>
+								{/each}
+							</select>
+						</div>
+
+						<div class="flex gap-4">
+							<div class="flex flex-1 flex-col gap-1.5">
+								<label for={`purchase-date-${draft.id}`} class="text-sm font-medium">Purchased</label>
+								<Input id={`purchase-date-${draft.id}`} type="date" bind:value={draft.purchaseDate} />
+							</div>
+							<div class="flex flex-1 flex-col gap-1.5">
+								<label for={`purchase-price-${draft.id}`} class="text-sm font-medium">Price</label>
+								<Input
+									id={`purchase-price-${draft.id}`}
+									type="text"
+									inputmode="decimal"
+									bind:value={draft.purchasePrice}
+									placeholder="0.00"
+								/>
+							</div>
 						</div>
 
 						<div class="flex flex-col gap-1.5">
