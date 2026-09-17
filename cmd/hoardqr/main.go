@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log"
@@ -8,6 +9,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"hoardqr/internal/config"
+	"hoardqr/internal/db"
 	"hoardqr/web"
 )
 
@@ -28,7 +33,30 @@ func main() {
 	}
 }
 
+// connectAndMigrate is shared by both run modes: each needs its own pool,
+// and applying migrations here (rather than a separate manual step) means
+// there's nothing to remember to run before starting either container —
+// db.Migrate is a no-op once the schema is current, guarded by Postgres's
+// own advisory lock if serve and mcp happen to start at the same time.
+func connectAndMigrate(ctx context.Context, cfg config.Config) *pgxpool.Pool {
+	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("connecting to database: %v", err)
+	}
+	if err := db.Migrate(cfg.DatabaseURL); err != nil {
+		log.Fatalf("running migrations: %v", err)
+	}
+	return pool
+}
+
 func serve() {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("loading config: %v", err)
+	}
+	ctx := context.Background()
+	pool := connectAndMigrate(ctx, cfg)
+
 	webFS, err := fs.Sub(web.Assets, "build")
 	if err != nil {
 		log.Fatalf("failed to load embedded web assets: %v", err)
@@ -40,16 +68,29 @@ func serve() {
 
 	const addr = ":8080"
 	log.Printf("hoardqr serve listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	// Captured (not log.Fatal'd directly) so pool.Close() actually runs before
+	// exit — log.Fatal calls os.Exit, which skips defers.
+	serveErr := http.ListenAndServe(addr, mux)
+	pool.Close()
+	log.Fatal(serveErr)
 }
 
 func mcp() {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("loading config: %v", err)
+	}
+	ctx := context.Background()
+	pool := connectAndMigrate(ctx, cfg)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
 
 	const addr = ":8081"
 	log.Printf("hoardqr mcp listening on %s (MCP tools not implemented yet)", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	serveErr := http.ListenAndServe(addr, mux)
+	pool.Close()
+	log.Fatal(serveErr)
 }
 
 func healthz(w http.ResponseWriter, r *http.Request) {
