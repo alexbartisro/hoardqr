@@ -34,11 +34,34 @@
 		});
 	}
 
-	let name = $state('');
-	let quantity = $state(1);
-	let description = $state('');
+	// One visit to a location often means storing several different objects
+	// (feedback 2026-09-17) — each "draft" is one object's own name/quantity/
+	// description/tags, all sharing the single locationId chosen in step 1.
+	type Draft = {
+		id: number;
+		name: string;
+		quantity: number;
+		description: string;
+		tags: Set<string>;
+	};
+
+	let draftSeq = 0;
+	function makeDraft(): Draft {
+		return { id: draftSeq++, name: '', quantity: 1, description: '', tags: new Set() };
+	}
+
+	// Captured from the plain object before it's wrapped in $state below, not
+	// read back out of `drafts` — reading a $state array outside a reactive
+	// context only captures its initial value anyway, and this only ever wants
+	// the initial value (mirrors scannedCode's one-time-capture reasoning
+	// above). Tied to a draft's identity, not its position: toCreate below
+	// drops empty drafts before submitting, so "the first draft" and "the
+	// first *created* item" aren't the same thing once a draft can be removed
+	// or left blank.
+	const firstDraft = makeDraft();
+	const scannedDraftId = firstDraft.id;
+	let drafts = $state<Draft[]>([firstDraft]);
 	let allTags = $state<Tag[]>([]);
-	let selectedTags = $state<Set<string>>(new Set());
 	let submitting = $state(false);
 	let error = $state<string | null>(null);
 
@@ -46,11 +69,19 @@
 	// reactive, so there's nothing to guard against re-running).
 	getTags().then((t) => (allTags = t));
 
-	function toggleTag(tagName: string) {
-		const next = new Set(selectedTags);
+	function toggleTag(draft: Draft, tagName: string) {
+		const next = new Set(draft.tags);
 		if (next.has(tagName)) next.delete(tagName);
 		else next.add(tagName);
-		selectedTags = next;
+		draft.tags = next;
+	}
+
+	function addMore() {
+		drafts.push(makeDraft());
+	}
+
+	function removeDraft(id: number) {
+		drafts = drafts.filter((d) => d.id !== id);
 	}
 
 	function resetForm() {
@@ -59,29 +90,43 @@
 		// session would otherwise start pre-filled with the previous item's data.
 		locationId = null;
 		breadcrumb = '';
-		name = '';
-		quantity = 1;
-		description = '';
-		selectedTags = new Set();
+		drafts = [makeDraft()];
 	}
 
 	async function submit() {
-		if (locationId == null || !name.trim()) return;
+		if (locationId == null) return;
+		const targetLocationId = locationId;
+		const toCreate = drafts.filter((d) => d.name.trim());
+		if (toCreate.length === 0) return;
 		submitting = true;
 		error = null;
 		try {
-			const created = await createItem({
-				name: name.trim(),
-				location_id: locationId,
-				quantity: Number(quantity) || 1,
-				description: description.trim() || null,
-				tags: [...selectedTags],
-				...(scannedCode ? { qr_token: scannedCode } : {})
-			});
+			const created = [];
+			for (const draft of toCreate) {
+				created.push(
+					await createItem({
+						name: draft.name.trim(),
+						location_id: targetLocationId,
+						quantity: Number(draft.quantity) || 1,
+						description: draft.description.trim() || null,
+						tags: [...draft.tags],
+						// One physical scan corresponds to one physical object, even
+						// when several different objects are stored in the same visit
+						// — only the draft that was on screen when the code arrived
+						// gets it (identity, not position: that draft may no longer
+						// be toCreate's first entry if an earlier one was removed).
+						...(scannedCode && draft.id === scannedDraftId ? { qr_token: scannedCode } : {})
+					})
+				);
+			}
 			resetForm();
-			await goto(`/items/${created.id}`);
+			if (created.length === 1) {
+				await goto(`/items/${created[0].id}`);
+			} else {
+				await goto(`/locations/${targetLocationId}`);
+			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to create item.';
+			error = e instanceof Error ? e.message : 'Failed to store object(s).';
 		} finally {
 			submitting = false;
 		}
@@ -115,56 +160,82 @@
 		<Card.Root variant="glass" class="p-4">
 			<Card.Content class="flex flex-col gap-4 p-0">
 				<p class="text-sm font-medium">Step 2: add the details</p>
-				{#if scannedCode}
-					<p class="text-muted-foreground text-sm">
-						Code <span class="font-mono">{scannedCode}</span> from scan will be used for this item.
-					</p>
-				{/if}
 
-				<div class="flex flex-col gap-1.5">
-					<label for="name" class="text-sm font-medium">Name</label>
-					<Input id="name" bind:value={name} placeholder="e.g. Multimeter" />
-				</div>
+				{#each drafts as draft, i (draft.id)}
+					<div class={cn('flex flex-col gap-4', i > 0 && 'border-t pt-4')}>
+						{#if drafts.length > 1}
+							<div class="flex items-center justify-between">
+								<span class="text-muted-foreground text-xs font-semibold uppercase">
+									Object {i + 1}
+								</span>
+								<Button variant="ghost" size="sm" onclick={() => removeDraft(draft.id)}>
+									Remove
+								</Button>
+							</div>
+						{/if}
 
-				<div class="flex flex-col gap-1.5">
-					<label for="quantity" class="text-sm font-medium">Quantity</label>
-					<Input id="quantity" type="number" min="1" bind:value={quantity} class="w-24" />
-				</div>
+						{#if draft.id === scannedDraftId && scannedCode}
+							<p class="text-muted-foreground text-sm">
+								Code <span class="font-mono">{scannedCode}</span> from scan will be used for this item.
+							</p>
+						{/if}
 
-				<div class="flex flex-col gap-1.5">
-					<label for="description" class="text-sm font-medium">Description</label>
-					<textarea
-						id="description"
-						bind:value={description}
-						rows="3"
-						class="border-input focus-visible:border-ring focus-visible:ring-ring/50 rounded-md border bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:ring-3"
-					></textarea>
-				</div>
-
-				{#if allTags.length > 0}
-					<div class="flex flex-col gap-1.5">
-						<span class="text-sm font-medium">Tags</span>
-						<div class="flex flex-wrap gap-2">
-							{#each allTags as t (t.id)}
-								<button
-									type="button"
-									class={cn(
-										'rounded-full border px-3 py-1 text-sm',
-										selectedTags.has(t.name) ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
-									)}
-									onclick={() => toggleTag(t.name)}
-								>
-									{t.name}
-								</button>
-							{/each}
+						<div class="flex flex-col gap-1.5">
+							<label for={`name-${draft.id}`} class="text-sm font-medium">Name</label>
+							<Input id={`name-${draft.id}`} bind:value={draft.name} placeholder="e.g. Multimeter" />
 						</div>
+
+						<div class="flex flex-col gap-1.5">
+							<label for={`quantity-${draft.id}`} class="text-sm font-medium">Quantity</label>
+							<Input
+								id={`quantity-${draft.id}`}
+								type="number"
+								min="1"
+								bind:value={draft.quantity}
+								class="w-24"
+							/>
+						</div>
+
+						<div class="flex flex-col gap-1.5">
+							<label for={`description-${draft.id}`} class="text-sm font-medium">Description</label>
+							<textarea
+								id={`description-${draft.id}`}
+								bind:value={draft.description}
+								rows="3"
+								class="border-input focus-visible:border-ring focus-visible:ring-ring/50 rounded-md border bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:ring-3"
+							></textarea>
+						</div>
+
+						{#if allTags.length > 0}
+							<div class="flex flex-col gap-1.5">
+								<span class="text-sm font-medium">Tags</span>
+								<div class="flex flex-wrap gap-2">
+									{#each allTags as t (t.id)}
+										<button
+											type="button"
+											class={cn(
+												'rounded-full border px-3 py-1 text-sm',
+												draft.tags.has(t.name) ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'
+											)}
+											onclick={() => toggleTag(draft, t.name)}
+										>
+											{t.name}
+										</button>
+									{/each}
+								</div>
+							</div>
+						{/if}
 					</div>
-				{/if}
+				{/each}
+
+				<Button variant="outline" onclick={addMore} disabled={submitting} class="self-start">
+					+ Add more
+				</Button>
 
 				{#if error}<p class="text-destructive text-sm">{error}</p>{/if}
 
-				<Button onclick={submit} disabled={submitting || !name.trim()}>
-					{submitting ? 'Adding…' : 'Add Object'}
+				<Button onclick={submit} disabled={submitting || !drafts.some((d) => d.name.trim())}>
+					{submitting ? 'Storing…' : 'Store Object'}
 				</Button>
 			</Card.Content>
 		</Card.Root>
