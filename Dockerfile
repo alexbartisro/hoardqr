@@ -5,8 +5,8 @@ RUN npm ci && npm run build              # adapter-static output → build/
 
 FROM golang:1.23-alpine AS backend
 WORKDIR /app
-COPY --from=frontend /app/web/build ./web/build
 COPY . .
+COPY --from=frontend /app/web/build ./web/build
 RUN go build -o hoardqr ./cmd/hoardqr    # web/build is go:embed'd in (web/embed.go)
 
 FROM alpine:3.20
