@@ -274,11 +274,20 @@ export async function scan(code: string): Promise<ScanResult> {
 export async function searchSuggest(query: string): Promise<SearchSuggestion[]> {
 	if (!query.trim()) return delay([]);
 
-	const results: SearchSuggestion[] = [];
+	// One entry per entity, keeping its best score — a query can match both an
+	// entity's code (exact) and its name (fuzzy); without this a single row could
+	// appear twice with an identical `kind+id` key, which is a duplicate-key error
+	// in Svelte's keyed {#each}, not just a cosmetic double-listing.
+	const results = new Map<string, SearchSuggestion>();
+	const upsert = (s: SearchSuggestion) => {
+		const key = `${s.kind}:${s.id}`;
+		const existing = results.get(key);
+		if (!existing || s.score > existing.score) results.set(key, s);
+	};
 
 	for (const item of items) {
 		if (codesMatch(item.qr_token, query)) {
-			results.push({
+			upsert({
 				kind: 'item',
 				id: item.id,
 				name: item.name,
@@ -290,7 +299,7 @@ export async function searchSuggest(query: string): Promise<SearchSuggestion[]> 
 	}
 	for (const location of locations) {
 		if (codesMatch(location.qr_token, query)) {
-			results.push({ kind: 'location', id: location.id, name: location.name, score: 1 });
+			upsert({ kind: 'location', id: location.id, name: location.name, score: 1 });
 		}
 	}
 
@@ -306,7 +315,7 @@ export async function searchSuggest(query: string): Promise<SearchSuggestion[]> 
 	for (const item of items) {
 		const score = fuzzyScore(item.name);
 		if (score > 0) {
-			results.push({
+			upsert({
 				kind: 'item',
 				id: item.id,
 				name: item.name,
@@ -318,15 +327,15 @@ export async function searchSuggest(query: string): Promise<SearchSuggestion[]> 
 	}
 	for (const location of locations) {
 		const score = fuzzyScore(location.name);
-		if (score > 0) results.push({ kind: 'location', id: location.id, name: location.name, score });
+		if (score > 0) upsert({ kind: 'location', id: location.id, name: location.name, score });
 	}
 	for (const tag of tags) {
 		const score = fuzzyScore(tag.name);
-		if (score > 0) results.push({ kind: 'tag', id: tag.id, name: tag.name, score });
+		if (score > 0) upsert({ kind: 'tag', id: tag.id, name: tag.name, score });
 	}
 
-	results.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
-	return delay(results.slice(0, 10));
+	const sorted = [...results.values()].sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+	return delay(sorted.slice(0, 10));
 }
 
 // --- GET /api/resolve-location?code= (§7) ---

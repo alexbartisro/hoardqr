@@ -8,6 +8,10 @@ node_modules
 /.svelte-kit
 /build
 
+# Vendored at postinstall from node_modules (scripts/vendor-tesseract-assets.mjs) —
+# derived build artifacts, not source.
+/static/tesseract
+
 # OS
 .DS_Store
 Thumbs.db
