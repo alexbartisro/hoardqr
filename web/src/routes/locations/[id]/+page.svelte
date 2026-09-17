@@ -7,6 +7,7 @@
 	import { getItems, getLocation, getLocations } from '$lib/api';
 	import type { Breadcrumb, Item, Location } from '$lib/types';
 	import * as Card from '$lib/components/ui/card';
+	import { Button } from '$lib/components/ui/button';
 
 	let location = $state<Location | null>(null);
 	let breadcrumb = $state<Breadcrumb>([]);
@@ -42,12 +43,15 @@
 	{:else if !location}
 		<p class="text-muted-foreground text-sm">Loading…</p>
 	{:else}
-		<div class="flex flex-wrap items-center gap-1 text-sm">
-			{#each breadcrumb.slice(0, -1) as b (b.id)}
-				<a href="/locations/{b.id}" class="hover:underline">{b.name}</a>
-				<span class="text-muted-foreground">›</span>
-			{/each}
-			<span class="font-medium">{location.name}</span>
+		<div class="flex flex-wrap items-center justify-between gap-2">
+			<div class="flex flex-wrap items-center gap-1 text-sm">
+				{#each breadcrumb.slice(0, -1) as b (b.id)}
+					<a href="/locations/{b.id}" class="hover:underline">{b.name}</a>
+					<span class="text-muted-foreground">›</span>
+				{/each}
+				<span class="font-medium">{location.name}</span>
+			</div>
+			<Button variant="outline" size="sm" href="/locations/{location.id}/label">Print label</Button>
 		</div>
 
 		{#if children.length > 0}

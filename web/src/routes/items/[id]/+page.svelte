@@ -100,8 +100,11 @@
 			{/if}
 		</Card.Root>
 
-		<Button variant="destructive" onclick={handleDelete} disabled={deleting}>
-			{deleting ? 'Deleting…' : 'Delete'}
-		</Button>
+		<div class="flex gap-2">
+			<Button variant="outline" href="/items/{item.id}/label">Print label</Button>
+			<Button variant="destructive" onclick={handleDelete} disabled={deleting}>
+				{deleting ? 'Deleting…' : 'Delete'}
+			</Button>
+		</div>
 	{/if}
 </div>
