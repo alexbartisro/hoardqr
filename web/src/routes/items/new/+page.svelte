@@ -50,7 +50,7 @@
 		submitting = true;
 		error = null;
 		try {
-			await createItem({
+			const created = await createItem({
 				name: name.trim(),
 				location_id: locationId,
 				quantity: Number(quantity) || 1,
@@ -58,8 +58,7 @@
 				tags: [...selectedTags]
 			});
 			resetForm();
-			// TODO(step 4.3): redirect to the new item's detail page once it exists.
-			await goto('/');
+			await goto(`/items/${created.id}`);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to create item.';
 		} finally {

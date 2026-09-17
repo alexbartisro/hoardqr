@@ -29,10 +29,9 @@
 		submitting = true;
 		error = null;
 		try {
-			await createLocation({ name: name.trim(), parent_id: parentId });
+			const created = await createLocation({ name: name.trim(), parent_id: parentId });
 			resetForm();
-			// TODO(step 4.3): redirect to the new location's contents page once it exists.
-			await goto('/');
+			await goto(`/locations/${created.id}`);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to create location.';
 		} finally {
