@@ -21,7 +21,10 @@
 			const result = await scan(code);
 			if (result.kind === 'item') {
 				if (result.items.length === 1) {
-					await goto(`/items/${result.items[0].id}`);
+					// ?scanned=1 tells the item page to lead with where the item goes
+					// (feedback 2026-09-17) — the whole point of scanning a physical
+					// object is "where does this live", not the item's own details.
+					await goto(`/items/${result.items[0].id}?scanned=1`);
 				} else {
 					pickerItems = result.items; // several items share this code — let the user pick
 				}
@@ -51,7 +54,10 @@
 			<Card.Content class="flex flex-col gap-1 p-0">
 				<p class="text-muted-foreground text-sm">Several items share this code — which one?</p>
 				{#each pickerItems as item (item.id)}
-					<a href="/items/{item.id}" class="hover:bg-accent block rounded-md px-2 py-1.5 text-left text-sm">
+					<a
+						href="/items/{item.id}?scanned=1"
+						class="hover:bg-accent block rounded-md px-2 py-1.5 text-left text-sm"
+					>
 						{item.name}
 					</a>
 				{/each}

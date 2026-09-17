@@ -11,6 +11,16 @@
 	let loadError = $state<string | null>(null);
 	let deleting = $state(false);
 
+	// Set by /scan when this page is the result of scanning the item's own code
+	// (feedback 2026-09-17): scanning a physical object is someone asking "where
+	// does this live", so that page leads with the destination location instead
+	// of item details. $derived, not captured once — unlike items/new's
+	// scannedCode (which only ever navigates away after success), this route
+	// can be revisited in place for a different id without remounting (see the
+	// loadSeq guard below), so a plain one-time read would go stale if the next
+	// visit here isn't itself from a scan.
+	let cameFromScan = $derived(page.url.searchParams.get('scanned') === '1');
+
 	// Guards against a slower response for a since-abandoned id winning over a
 	// faster one for the current id — same pattern as location-picker.svelte's
 	// search debounce, needed anywhere an $effect kicks off a fetch keyed by a
@@ -52,13 +62,36 @@
 	{:else if !item}
 		<p class="text-muted-foreground text-sm">Loading…</p>
 	{:else}
-		<div class="flex flex-wrap items-center gap-1 text-sm">
-			{#each breadcrumb as b (b.id)}
-				<a href="/locations/{b.id}" class="hover:underline">{b.name}</a>
-				<span class="text-muted-foreground">›</span>
-			{/each}
-			<span class="font-medium">{item.name}</span>
-		</div>
+		{#if cameFromScan}
+			<Card.Root variant="glass" class="border-primary/50 p-4">
+				<Card.Content class="flex flex-col gap-1 p-0">
+					<p class="text-muted-foreground text-xs font-medium tracking-wide uppercase">This goes in</p>
+					<p class="text-2xl font-semibold">{breadcrumb.at(-1)?.name}</p>
+					{#if breadcrumb.length > 1}
+						<p class="text-muted-foreground text-sm">
+							{breadcrumb
+								.slice(0, -1)
+								.map((b) => b.name)
+								.join(' › ')}
+						</p>
+					{/if}
+					<a
+						href="/locations/{item.location_id}"
+						class="text-primary mt-1 self-start text-sm underline-offset-2 hover:underline"
+					>
+						View location →
+					</a>
+				</Card.Content>
+			</Card.Root>
+		{:else}
+			<div class="flex flex-wrap items-center gap-1 text-sm">
+				{#each breadcrumb as b (b.id)}
+					<a href="/locations/{b.id}" class="hover:underline">{b.name}</a>
+					<span class="text-muted-foreground">›</span>
+				{/each}
+				<span class="font-medium">{item.name}</span>
+			</div>
+		{/if}
 
 		<Card.Root variant="glass" class="p-4">
 			<Card.Header class="p-0">
