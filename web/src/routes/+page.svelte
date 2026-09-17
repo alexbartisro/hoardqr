@@ -1,19 +1,31 @@
 <script lang="ts">
 	import * as Card from '$lib/components/ui/card';
-	import LocationPicker from '$lib/components/location-picker.svelte';
-
-	let locationId = $state<number | null>(null);
-	let breadcrumb = $state('');
+	import Package from '@lucide/svelte/icons/package';
+	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 </script>
 
-<main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 p-6">
-	<Card.Root variant="glass">
-		<Card.Header>
-			<Card.Title>HoardQR</Card.Title>
-			<Card.Description>Location Picker sanity check — Phase 2, step 3.</Card.Description>
-		</Card.Header>
-		<Card.Content>
-			<LocationPicker bind:locationId bind:breadcrumb />
-		</Card.Content>
-	</Card.Root>
-</main>
+<div class="flex flex-col gap-4">
+	<a href="/items/new" class="block">
+		<Card.Root variant="glass" class="transition-transform active:scale-[0.98]">
+			<Card.Content class="flex flex-row items-center gap-4">
+				<Package class="text-primary size-8" />
+				<div>
+					<Card.Title>Add Object</Card.Title>
+					<Card.Description>Catalog something new and place it in a location.</Card.Description>
+				</div>
+			</Card.Content>
+		</Card.Root>
+	</a>
+
+	<a href="/locations/new" class="block">
+		<Card.Root variant="glass" class="transition-transform active:scale-[0.98]">
+			<Card.Content class="flex flex-row items-center gap-4">
+				<FolderPlus class="text-primary size-8" />
+				<div>
+					<Card.Title>Add Storage</Card.Title>
+					<Card.Description>Create a new box, shelf, or other storage location.</Card.Description>
+				</div>
+			</Card.Content>
+		</Card.Root>
+	</a>
+</div>
