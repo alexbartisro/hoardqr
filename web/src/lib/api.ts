@@ -183,6 +183,30 @@ export async function getItems(params: { q?: string; tag?: string; location_id?:
 	return delay(result);
 }
 
+// --- GET /api/items?sort=created_desc&page=&pageSize= — not in §9's table. The
+// dashboard (Phase 2 step 4) shipped with no way to browse existing items short
+// of already knowing what to search for; this is the fix — a paginated, newest-
+// first feed. Add this route for real in Phase 3. breadcrumb here is deepest-
+// location-first (the opposite of everywhere else in the app, which goes
+// root-to-leaf) — for a scan-down-the-list glance, "which box" is the more
+// useful headline than "which building".
+export async function getRecentItems(
+	params: { page?: number; pageSize?: number } = {}
+): Promise<{ entries: { item: Item; breadcrumb: string }[]; total: number }> {
+	const page = params.page ?? 1;
+	const pageSize = params.pageSize ?? 10;
+	const sorted = [...items].sort((a, b) => b.created_at.localeCompare(a.created_at));
+	const start = (page - 1) * pageSize;
+	const entries = sorted.slice(start, start + pageSize).map((item) => ({
+		item,
+		breadcrumb: getBreadcrumb(item.location_id)
+			.map((l) => l.name)
+			.reverse()
+			.join(' > ')
+	}));
+	return delay({ entries, total: sorted.length });
+}
+
 // --- GET /api/tags — not in §9's table, but the Add Object form (Phase 2 step 4)
 // needs a full tag list for selection; add this route for real in Phase 3. ---
 export async function getTags(): Promise<Tag[]> {
