@@ -1,13 +1,19 @@
 <script lang="ts">
 	// Add Storage flow (architecture plan §8): Location Picker here sets an optional
-	// parent (a root-level location like "Balcony" has none). Code/label assignment
-	// is deferred to editing after creation (step 4.5 — printable label sheet).
+	// parent (a root-level location like "Balcony" has none). A "generate vs. adopt
+	// a barcode" code-assignment UI is deferred to editing after creation (label
+	// sheet, still to come) — the one exception is /scan's "no match — create here"
+	// outcome (§6), which passes an already-scanned code through via ?code=.
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { createLocation } from '$lib/api';
 	import LocationPicker from '$lib/components/location-picker.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Card from '$lib/components/ui/card';
+
+	// Captured once, not $derived — see the same note in items/new/+page.svelte.
+	let scannedCode = $state(page.url.searchParams.get('code'));
 
 	let parentId = $state<number | null>(null);
 	let breadcrumb = $state('');
@@ -29,7 +35,11 @@
 		submitting = true;
 		error = null;
 		try {
-			const created = await createLocation({ name: name.trim(), parent_id: parentId });
+			const created = await createLocation({
+				name: name.trim(),
+				parent_id: parentId,
+				...(scannedCode ? { qr_token: scannedCode } : {})
+			});
 			resetForm();
 			await goto(`/locations/${created.id}`);
 		} catch (e) {
@@ -49,6 +59,12 @@
 
 	<Card.Root variant="glass" class="p-4">
 		<Card.Content class="flex flex-col gap-4 p-0">
+			{#if scannedCode}
+				<p class="text-muted-foreground text-sm">
+					Code <span class="font-mono">{scannedCode}</span> from scan will be used for this location.
+				</p>
+			{/if}
+
 			<div class="flex flex-col gap-1.5">
 				<label for="name" class="text-sm font-medium">Name</label>
 				<Input id="name" bind:value={name} placeholder="e.g. Storage Cabinet" />

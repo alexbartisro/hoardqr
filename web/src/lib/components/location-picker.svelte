@@ -9,6 +9,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Tabs from '$lib/components/ui/tabs';
+	import QrScanner from '$lib/components/qr-scanner.svelte';
 
 	let {
 		locationId = $bindable<number | null>(null),
@@ -29,11 +30,6 @@
 
 	let pickerItems = $state<Item[] | null>(null); // ambiguous scan/resolve result (§6)
 	let resolveError = $state<string | null>(null);
-
-	let scanning = $state(false);
-	let scanError = $state<string | null>(null);
-	const scannerId = `location-picker-scanner-${Math.random().toString(36).slice(2)}`;
-	let html5QrCode: import('html5-qrcode').Html5Qrcode | null = null;
 
 	let videoEl = $state<HTMLVideoElement | null>(null);
 	let ocrStream = $state<MediaStream | null>(null);
@@ -68,7 +64,6 @@
 
 	$effect(() => {
 		return () => {
-			stopScan();
 			stopOcrCamera();
 		};
 	});
@@ -104,40 +99,6 @@
 
 	async function choosePickerItem(item: Item) {
 		await resolveTo(item.location_id);
-	}
-
-	async function startScan() {
-		scanError = null;
-		scanning = true;
-		const { Html5Qrcode } = await import('html5-qrcode');
-		html5QrCode = new Html5Qrcode(scannerId);
-		try {
-			await html5QrCode.start(
-				{ facingMode: 'environment' },
-				{ fps: 10, qrbox: 250 },
-				async (decodedText: string) => {
-					await stopScan();
-					await handleResolvedCode(decodedText);
-				},
-				() => {} // per-frame decode misses are expected noise, not errors
-			);
-		} catch (e) {
-			scanning = false;
-			scanError = e instanceof Error ? e.message : 'Could not start camera.';
-		}
-	}
-
-	async function stopScan() {
-		scanning = false;
-		if (html5QrCode) {
-			try {
-				await html5QrCode.stop();
-				html5QrCode.clear();
-			} catch {
-				// already stopped
-			}
-			html5QrCode = null;
-		}
 	}
 
 	async function startOcrCamera() {
@@ -200,10 +161,9 @@
 	}
 
 	async function switchTab(next: 'type' | 'scan' | 'ocr') {
-		// Both scan and OCR want exclusive camera access — await teardown before the
-		// next tab claims the device, or a rapid switch can race two consumers over
-		// the same stream.
-		if (tab === 'scan' && next !== 'scan') await stopScan();
+		// OCR wants exclusive camera access — await teardown before the next tab
+		// claims the device. QrScanner handles its own teardown on unmount (it's
+		// only mounted while tab === 'scan', below), so nothing to do for it here.
 		if (tab === 'ocr' && next !== 'ocr') stopOcrCamera();
 		tab = next;
 		if (next === 'ocr') await startOcrCamera();
@@ -263,13 +223,9 @@
 			</Tabs.Content>
 
 			<Tabs.Content value="scan" class="flex flex-col gap-2">
-				<div id={scannerId} class="mx-auto w-full max-w-xs"></div>
-				{#if !scanning}
-					<Button onclick={startScan}>Start camera</Button>
-				{:else}
-					<Button variant="outline" onclick={stopScan}>Stop</Button>
+				{#if tab === 'scan'}
+					<QrScanner onDecode={handleResolvedCode} />
 				{/if}
-				{#if scanError}<p class="text-destructive text-sm">{scanError}</p>{/if}
 			</Tabs.Content>
 
 			<Tabs.Content value="ocr" class="flex flex-col gap-2">

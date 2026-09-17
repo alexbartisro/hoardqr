@@ -2,6 +2,7 @@
 	// Add Object flow (architecture plan §8): Location Picker is required and comes
 	// first — you're usually standing next to where the thing lives when you add it.
 	// Everything else is optional at creation, editable later.
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { createItem, getTags } from '$lib/api';
 	import type { Tag } from '$lib/types';
@@ -10,6 +11,13 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Card from '$lib/components/ui/card';
 	import { cn } from '$lib/utils';
+
+	// Arrives from /scan's "no match — create here" outcome (§6): the scanned
+	// code becomes this item's qr_token instead of generating a new one. Captured
+	// once (not $derived) — this route never remounts on a successful create (it
+	// navigates away entirely), but a plain $derived would silently pick up a
+	// stale ?code= again if that ever changed and make it the next item's code.
+	let scannedCode = $state(page.url.searchParams.get('code'));
 
 	let locationId = $state<number | null>(null);
 	let breadcrumb = $state('');
@@ -55,7 +63,8 @@
 				location_id: locationId,
 				quantity: Number(quantity) || 1,
 				description: description.trim() || null,
-				tags: [...selectedTags]
+				tags: [...selectedTags],
+				...(scannedCode ? { qr_token: scannedCode } : {})
 			});
 			resetForm();
 			await goto(`/items/${created.id}`);
@@ -77,6 +86,12 @@
 	{#if locationId != null}
 		<Card.Root variant="glass" class="p-4">
 			<Card.Content class="flex flex-col gap-4 p-0">
+				{#if scannedCode}
+					<p class="text-muted-foreground text-sm">
+						Code <span class="font-mono">{scannedCode}</span> from scan will be used for this item.
+					</p>
+				{/if}
+
 				<div class="flex flex-col gap-1.5">
 					<label for="name" class="text-sm font-medium">Name</label>
 					<Input id="name" bind:value={name} placeholder="e.g. Multimeter" />
