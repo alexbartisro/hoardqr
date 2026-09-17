@@ -4,7 +4,7 @@
 	// Everything else is optional at creation, editable later.
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { createItem, getTags } from '$lib/api';
+	import { createItem, getLocation, getTags } from '$lib/api';
 	import type { Tag } from '$lib/types';
 	import LocationPicker from '$lib/components/location-picker.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -21,6 +21,18 @@
 
 	let locationId = $state<number | null>(null);
 	let breadcrumb = $state('');
+
+	// Arrives from the "+ Add new storage" link's round trip through
+	// /locations/new (?returnTo=/items/new) — the newly created location comes
+	// back as ?locationId= instead of making the user pick it again. Fire-and-forget
+	// like getTags() below; same one-time-capture reasoning as scannedCode above.
+	const returnedLocationId = page.url.searchParams.get('locationId');
+	if (returnedLocationId) {
+		getLocation(Number(returnedLocationId)).then(({ location, breadcrumb: path }) => {
+			locationId = location.id;
+			breadcrumb = path.map((p) => p.name).join(' > ');
+		});
+	}
 
 	let name = $state('');
 	let quantity = $state(1);
@@ -80,12 +92,29 @@
 	<h1 class="text-xl font-semibold">Add Object</h1>
 
 	<Card.Root variant="glass" class="p-4">
-		<LocationPicker bind:locationId bind:breadcrumb />
+		<Card.Content class="flex flex-col gap-3 p-0">
+			<div class="flex items-center justify-between gap-2">
+				<p class="text-sm font-medium">Step 1: choose where you'd like to store it</p>
+				{#if locationId == null}
+					<Button
+						variant="link"
+						size="sm"
+						href={`/locations/new?returnTo=${encodeURIComponent(
+							scannedCode ? `/items/new?code=${encodeURIComponent(scannedCode)}` : '/items/new'
+						)}`}
+					>
+						+ Add new storage
+					</Button>
+				{/if}
+			</div>
+			<LocationPicker bind:locationId bind:breadcrumb />
+		</Card.Content>
 	</Card.Root>
 
 	{#if locationId != null}
 		<Card.Root variant="glass" class="p-4">
 			<Card.Content class="flex flex-col gap-4 p-0">
+				<p class="text-sm font-medium">Step 2: add the details</p>
 				{#if scannedCode}
 					<p class="text-muted-foreground text-sm">
 						Code <span class="font-mono">{scannedCode}</span> from scan will be used for this item.

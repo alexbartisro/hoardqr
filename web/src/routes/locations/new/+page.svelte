@@ -15,6 +15,13 @@
 	// Captured once, not $derived — see the same note in items/new/+page.svelte.
 	let scannedCode = $state(page.url.searchParams.get('code'));
 
+	// Set when arriving from another create flow's "+ Add new storage" link (e.g.
+	// items/new). Only a same-origin relative path is honored — a query param is
+	// attacker-controllable, so an absolute/protocol-relative value is ignored
+	// rather than used as a redirect target.
+	const returnTo = page.url.searchParams.get('returnTo');
+	const safeReturnTo = returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : null;
+
 	let parentId = $state<number | null>(null);
 	let breadcrumb = $state('');
 
@@ -41,7 +48,12 @@
 				...(scannedCode ? { qr_token: scannedCode } : {})
 			});
 			resetForm();
-			await goto(`/locations/${created.id}`);
+			if (safeReturnTo) {
+				const sep = safeReturnTo.includes('?') ? '&' : '?';
+				await goto(`${safeReturnTo}${sep}locationId=${created.id}`);
+			} else {
+				await goto(`/locations/${created.id}`);
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to create location.';
 		} finally {
