@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"hoardqr/internal/api"
 	"hoardqr/internal/config"
 	"hoardqr/internal/db"
 	"hoardqr/web"
@@ -62,15 +63,14 @@ func serve() {
 		log.Fatalf("failed to load embedded web assets: %v", err)
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", healthz)
-	mux.Handle("/", spaHandler(webFS))
+	router := api.NewRouter(pool)
+	router.NotFound(spaHandler(webFS).ServeHTTP)
 
 	const addr = ":8080"
 	log.Printf("hoardqr serve listening on %s", addr)
 	// Captured (not log.Fatal'd directly) so pool.Close() actually runs before
 	// exit — log.Fatal calls os.Exit, which skips defers.
-	serveErr := http.ListenAndServe(addr, mux)
+	serveErr := http.ListenAndServe(addr, router)
 	pool.Close()
 	log.Fatal(serveErr)
 }
