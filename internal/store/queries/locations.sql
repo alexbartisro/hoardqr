@@ -56,4 +56,13 @@ DELETE FROM items WHERE location_id = $1;
 DELETE FROM locations WHERE id = $1;
 
 -- name: LocationQRTokenInUse :one
-SELECT EXISTS(SELECT 1 FROM locations WHERE qr_token = $1 AND id != $2);
+-- Compared normalized (not raw), matching idx_locations_qr_token_normalized
+-- (migration 000002) — otherwise this pre-check could say "not in use" for a
+-- value the unique index would still reject. TRANSLATE(UPPER(x), ...), not
+-- UPPER(TRANSLATE(x, ...)) — see migration 000002's comment for why the
+-- order matters.
+SELECT EXISTS(
+    SELECT 1 FROM locations
+    WHERE TRANSLATE(UPPER(qr_token), 'OIL', '011') = TRANSLATE(UPPER(sqlc.arg(qr_token)::text), 'OIL', '011')
+      AND id != sqlc.arg(id)::bigint
+);

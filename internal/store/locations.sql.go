@@ -219,7 +219,11 @@ func (q *Queries) LocationExists(ctx context.Context, id int64) (bool, error) {
 }
 
 const locationQRTokenInUse = `-- name: LocationQRTokenInUse :one
-SELECT EXISTS(SELECT 1 FROM locations WHERE qr_token = $1 AND id != $2)
+SELECT EXISTS(
+    SELECT 1 FROM locations
+    WHERE TRANSLATE(UPPER(qr_token), 'OIL', '011') = TRANSLATE(UPPER($1::text), 'OIL', '011')
+      AND id != $2::bigint
+)
 `
 
 type LocationQRTokenInUseParams struct {
@@ -227,6 +231,11 @@ type LocationQRTokenInUseParams struct {
 	ID      int64
 }
 
+// Compared normalized (not raw), matching idx_locations_qr_token_normalized
+// (migration 000002) — otherwise this pre-check could say "not in use" for a
+// value the unique index would still reject. TRANSLATE(UPPER(x), ...), not
+// UPPER(TRANSLATE(x, ...)) — see migration 000002's comment for why the
+// order matters.
 func (q *Queries) LocationQRTokenInUse(ctx context.Context, arg LocationQRTokenInUseParams) (bool, error) {
 	row := q.db.QueryRow(ctx, locationQRTokenInUse, arg.QrToken, arg.ID)
 	var exists bool
