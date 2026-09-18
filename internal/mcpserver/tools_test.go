@@ -314,6 +314,41 @@ func TestMCPToolsFindItemsByTag(t *testing.T) {
 	}
 }
 
+// TestMCPToolsFindItemsTrimsQuery proves find_items trims its query the same
+// way the REST search handler and resolveLocation/resolveItem already do —
+// a leading/trailing space (e.g. an LLM relaying a pasted code verbatim)
+// must not break the exact-code match branch, and an empty/whitespace-only
+// query must return no results rather than erroring.
+func TestMCPToolsFindItemsTrimsQuery(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM items WHERE name LIKE 'MCP Test %'`); err != nil {
+			t.Logf("cleanup: deleting test items: %v", err)
+		}
+		if _, err := pool.Exec(context.Background(), `DELETE FROM locations WHERE name LIKE 'MCP Test %'`); err != nil {
+			t.Logf("cleanup: deleting test locations: %v", err)
+		}
+	})
+
+	var loc addLocationOutput
+	callTool(t, cs, "add_location", map[string]any{"name": "MCP Test Trim Shelf"}, &loc)
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{"name": "MCP Test Trim Widget", "location": "MCP Test Trim Shelf"}, &item)
+
+	var found findItemsOutput
+	callTool(t, cs, "find_items", map[string]any{"query": "  " + item.Code + "  "}, &found)
+	if !containsItem(found.Items, item.ID, "MCP Test Trim Shelf") {
+		t.Fatalf("find_items didn't match an exact code padded with whitespace: %+v", found.Items)
+	}
+
+	callTool(t, cs, "find_items", map[string]any{"query": "   "}, &found)
+	if len(found.Items) != 0 {
+		t.Fatalf("expected a whitespace-only query to return no results, got %+v", found.Items)
+	}
+}
+
 // TestMCPToolsSearchByKindAvoidsFalseNotFound reproduces the false-negative
 // half of the Obsidian backend TODO's SearchSuggest LIMIT-10 finding:
 // resolveItem/resolveLocation used to filter a single SearchSuggest call's

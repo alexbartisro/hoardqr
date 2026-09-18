@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -64,16 +65,29 @@ type findItemsOutput struct {
 
 func findItemsHandler(q *store.Queries) mcp.ToolHandlerFor[findItemsInput, findItemsOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in findItemsInput) (*mcp.CallToolResult, findItemsOutput, error) {
+		// Trimmed, like the REST search handler (internal/api/search.go's
+		// Suggest) and resolveLocation/resolveItem — untrimmed, a leading or
+		// trailing space (e.g. an LLM relaying a user's pasted code verbatim)
+		// breaks the exact-code match branch and finds nothing, the same class
+		// of bug already found and fixed once for the REST endpoint. An empty
+		// query returns no results rather than erroring, matching the REST
+		// handler's own empty-query behavior — asking to find "nothing" isn't
+		// a caller mistake worth a tool error.
+		out := findItemsOutput{Items: []foundItem{}}
+		query := strings.TrimSpace(in.Query)
+		if query == "" {
+			return nil, out, nil
+		}
+
 		// SearchSuggestByKind, not SearchSuggest — a shared top-10 across
 		// kinds let a higher-scoring location/tag match crowd out real item
 		// matches entirely (a query could come back empty despite a genuine
 		// match existing). Two separate calls, one per kind actually needed
 		// here, rather than one mixed query filtered in Go. See the Obsidian
 		// backend TODO for the verified failure case.
-		out := findItemsOutput{Items: []foundItem{}}
 		seen := make(map[int64]bool)
 
-		itemRows, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: in.Query, Kind: "item"})
+		itemRows, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: query, Kind: "item"})
 		if err != nil {
 			return nil, findItemsOutput{}, err
 		}
@@ -94,7 +108,7 @@ func findItemsHandler(q *store.Queries) mcp.ToolHandlerFor[findItemsInput, findI
 		// name/code) still needs to surface its items here, via the same
 		// exact-tag lookup ListItems already offers the REST item-browsing
 		// endpoint (§9's Mock API surface gaps, see CLAUDE.md).
-		tagRows, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: in.Query, Kind: "tag"})
+		tagRows, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: query, Kind: "tag"})
 		if err != nil {
 			return nil, findItemsOutput{}, err
 		}
