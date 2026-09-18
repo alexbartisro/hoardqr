@@ -291,6 +291,28 @@ func (h *LocationsHandler) update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A new parent that is this location itself, or one of its own
+	// descendants, would create a cycle — the FK alone doesn't prevent this,
+	// and LocationBreadcrumb/DescendantLocationIDs are unbounded recursive
+	// CTEs that would then never terminate for anything touching the
+	// resulting loop (item/location detail, the dashboard feed, search, and
+	// every MCP tool that resolves a location). DescendantLocationIDs(id)
+	// already includes id itself, so membership in that set is exactly the
+	// "would cycle" condition, with no extra query needed.
+	if newParentID, ok := set["parent_id"].(*int64); ok && newParentID != nil {
+		descendantIDs, err := h.q.DescendantLocationIDs(r.Context(), id)
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		for _, d := range descendantIDs {
+			if d == *newParentID {
+				writeError(w, http.StatusConflict, "parent_id would create a cycle (it is this location or one of its own descendants)")
+				return
+			}
+		}
+	}
+
 	query, args := buildUpdateQuery("locations", id, set)
 	if _, err := h.pool.Exec(r.Context(), query, args...); err != nil {
 		if pgConflict(err) {

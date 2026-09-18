@@ -8,21 +8,36 @@ SELECT * FROM locations WHERE id = $1;
 SELECT EXISTS(SELECT 1 FROM locations WHERE id = $1);
 
 -- name: LocationBreadcrumb :many
--- Root-to-leaf path (architecture plan §3).
+-- Root-to-leaf path (architecture plan §3). The `visited` array + the
+-- `WHERE NOT (l.id = ANY(p.visited))` guard is deliberate cycle-detection
+-- insurance: it's the only thing standing between a corrupted/cyclic
+-- parent_id chain and an infinite loop. Plain UNION (instead of UNION ALL)
+-- would NOT be enough here on its own — `depth` increments every iteration,
+-- so every row in a cycle is still a distinct tuple and UNION's dedup would
+-- never kick in. The real prevention is LocationsHandler.update rejecting a
+-- parent_id that would create a cycle in the first place
+-- (internal/api/locations.go) — this is just a backstop for rows that
+-- predate that check or were edited directly, and it bounds recursion to at
+-- most one pass over all locations regardless.
 WITH RECURSIVE path AS (
-    SELECT l0.id, l0.parent_id, l0.name, 1 AS depth FROM locations l0 WHERE l0.id = $1
+    SELECT l0.id, l0.parent_id, l0.name, 1 AS depth, ARRAY[l0.id] AS visited
+    FROM locations l0 WHERE l0.id = $1
     UNION ALL
-    SELECT l.id, l.parent_id, l.name, p.depth + 1
+    SELECT l.id, l.parent_id, l.name, p.depth + 1, p.visited || l.id
     FROM locations l JOIN path p ON l.id = p.parent_id
+    WHERE NOT (l.id = ANY(p.visited))
 )
 SELECT path.id, path.name FROM path ORDER BY depth DESC;
 
 -- name: DescendantLocationIDs :many
 -- Includes the root id itself, matching the mock's descendantLocationIds().
+-- Same visited-array cycle-detection insurance as LocationBreadcrumb above.
 WITH RECURSIVE descendants AS (
-    SELECT l0.id FROM locations l0 WHERE l0.id = $1
+    SELECT l0.id, ARRAY[l0.id] AS visited FROM locations l0 WHERE l0.id = $1
     UNION ALL
-    SELECT l.id FROM locations l JOIN descendants d ON l.parent_id = d.id
+    SELECT l.id, d.visited || l.id
+    FROM locations l JOIN descendants d ON l.parent_id = d.id
+    WHERE NOT (l.id = ANY(d.visited))
 )
 SELECT descendants.id FROM descendants;
 
