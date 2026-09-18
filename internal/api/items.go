@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -179,17 +180,19 @@ type createItemRequest struct {
 // background and persisted" guarantee createTag gives the tag autocomplete
 // (web/src/lib/api.ts), but enforced here too so any caller of this endpoint
 // (MCP's add_item later, for instance) gets it for free, not just the UI
-// path that happens to call POST /api/tags first.
-func (h *ItemsHandler) resolveTagIDs(ctx context.Context, names []string) ([]int64, error) {
+// path that happens to call POST /api/tags first. Takes q explicitly (not
+// h.q) so callers running inside a transaction pass the tx-scoped Queries —
+// see withTx.
+func resolveTagIDs(ctx context.Context, q *store.Queries, names []string) ([]int64, error) {
 	ids := make([]int64, 0, len(names))
 	for _, name := range names {
 		trimmed := strings.TrimSpace(name)
 		if trimmed == "" {
 			continue
 		}
-		tag, err := h.q.GetTagByNameCI(ctx, trimmed)
+		tag, err := q.GetTagByNameCI(ctx, trimmed)
 		if isNoRows(err) {
-			tag, err = h.q.InsertTag(ctx, trimmed)
+			tag, err = q.InsertTag(ctx, trimmed)
 		}
 		if err != nil {
 			return nil, err
@@ -244,38 +247,45 @@ func (h *ItemsHandler) create(w http.ResponseWriter, r *http.Request) {
 		customFields = *req.CustomFields
 	}
 
-	item, err := h.q.InsertItem(r.Context(), store.InsertItemParams{
-		LocationID:    req.LocationID,
-		OwnerID:       nil, // no auth yet (Phase 3 step 5)
-		IsShared:      isShared,
-		Name:          req.Name,
-		Description:   req.Description,
-		Quantity:      quantity,
-		Condition:     req.Condition,
-		QrToken:       *qrToken,
-		PhotoUrl:      req.PhotoURL,
-		PurchaseDate:  purchaseDate,
-		PurchasePrice: floatToNumeric(req.PurchasePrice),
-		ReceiptUrl:    req.ReceiptURL,
-		CustomFields:  customFields,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	tagIDs, err := h.resolveTagIDs(r.Context(), req.Tags)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	for _, tagID := range tagIDs {
-		if err := h.q.LinkItemTag(r.Context(), store.LinkItemTagParams{ItemID: item.ID, TagID: tagID}); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
+	// Insert + tag resolution + linking run as one transaction — otherwise a
+	// mid-sequence failure (e.g. the second of three tag links) leaves a real
+	// item row with only some of its tags attached instead of either fully
+	// succeeding or not existing at all.
+	var item store.Item
+	var tagNames []string
+	err = withTx(r.Context(), h.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		var err error
+		item, err = q.InsertItem(r.Context(), store.InsertItemParams{
+			LocationID:    req.LocationID,
+			OwnerID:       nil, // no auth yet (Phase 3 step 5)
+			IsShared:      isShared,
+			Name:          req.Name,
+			Description:   req.Description,
+			Quantity:      quantity,
+			Condition:     req.Condition,
+			QrToken:       *qrToken,
+			PhotoUrl:      req.PhotoURL,
+			PurchaseDate:  purchaseDate,
+			PurchasePrice: floatToNumeric(req.PurchasePrice),
+			ReceiptUrl:    req.ReceiptURL,
+			CustomFields:  customFields,
+		})
+		if err != nil {
+			return err
 		}
-	}
-	tagNames, err := h.q.TagNamesForItem(r.Context(), item.ID)
+		tagIDs, err := resolveTagIDs(r.Context(), q, req.Tags)
+		if err != nil {
+			return err
+		}
+		for _, tagID := range tagIDs {
+			if err := q.LinkItemTag(r.Context(), store.LinkItemTagParams{ItemID: item.ID, TagID: tagID}); err != nil {
+				return err
+			}
+		}
+		tagNames, err = q.TagNamesForItem(r.Context(), item.ID)
+		return err
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -412,39 +422,47 @@ func (h *ItemsHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(set) > 0 {
-		query, args := buildUpdateQuery("items", id, set)
-		// Appended as a literal SQL clause, not routed through `set` — doing
-		// it via the map relied on "updated_at" sorting last among the
-		// present keys to compute the right placeholder number and strip
-		// the right arg, which broke for any column name sorting after it.
-		query = strings.Replace(query, " WHERE id = $1", ", updated_at = now() WHERE id = $1", 1)
-		if _, err := h.pool.Exec(r.Context(), query, args...); err != nil {
-			if pgConflict(err) {
-				writeError(w, http.StatusConflict, "conflict updating item")
-				return
+	// Column update + tag replace/link run as one transaction, same reasoning
+	// as create() — a rename that succeeds but a tag-link that fails partway
+	// would otherwise leave the item half-updated.
+	err = withTx(r.Context(), h.pool, func(tx pgx.Tx) error {
+		if len(set) > 0 {
+			query, args := buildUpdateQuery("items", id, set)
+			// Appended as a literal SQL clause, not routed through `set` —
+			// doing it via the map relied on "updated_at" sorting last among
+			// the present keys to compute the right placeholder number and
+			// strip the right arg, which broke for any column name sorting
+			// after it.
+			query = strings.Replace(query, " WHERE id = $1", ", updated_at = now() WHERE id = $1", 1)
+			if _, err := tx.Exec(r.Context(), query, args...); err != nil {
+				return err
 			}
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
 		}
-	}
 
-	if hasTags {
-		tagIDs, err := h.resolveTagIDs(r.Context(), newTags)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if err := h.q.ReplaceItemTags(r.Context(), id); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		for _, tagID := range tagIDs {
-			if err := h.q.LinkItemTag(r.Context(), store.LinkItemTagParams{ItemID: id, TagID: tagID}); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
+		if hasTags {
+			q := store.New(tx)
+			tagIDs, err := resolveTagIDs(r.Context(), q, newTags)
+			if err != nil {
+				return err
+			}
+			if err := q.ReplaceItemTags(r.Context(), id); err != nil {
+				return err
+			}
+			for _, tagID := range tagIDs {
+				if err := q.LinkItemTag(r.Context(), store.LinkItemTagParams{ItemID: id, TagID: tagID}); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		if pgConflict(err) {
+			writeError(w, http.StatusConflict, "conflict updating item")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 
 	row, err := h.q.GetItemByID(r.Context(), id)

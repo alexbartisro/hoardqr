@@ -41,9 +41,17 @@ type createTagRequest struct {
 	Name string `json:"name"`
 }
 
-// Idempotent by case-insensitive name — a duplicate create (e.g. the same
-// new tag typed on two Add Object drafts) returns the tag already created
-// instead of erroring or inserting a second row. Matches the mock exactly.
+// Idempotent by case-insensitive name against a single concurrent duplicate
+// with the *same* casing — the exact-case race is closed by catching the
+// unique-violation and re-reading. Matches the mock exactly, but note this
+// is a single INSERT, not a multi-statement write, so it's not the same
+// defect class as items.go's create/update (nothing here needs withTx).
+// tags.name is only UNIQUE case-sensitively (§3's schema, unchanged), so two
+// requests racing with *different* casing ("Camping" vs "camping") can both
+// pass the CI lookup and both insert successfully — a narrow, pre-existing
+// gap this fix doesn't close. Would need a case-insensitive unique index
+// (e.g. on lower(name)) to close for real; not done here since it's a schema
+// change beyond what was asked.
 func (h *TagsHandler) create(w http.ResponseWriter, r *http.Request) {
 	var req createTagRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
