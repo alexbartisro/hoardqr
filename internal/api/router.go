@@ -10,9 +10,10 @@ import (
 
 // NewRouter mounts every handler under /api, uploaded-photo static serving
 // at /uploads/ (§12 — separate from /api since it's plain file serving, not
-// JSON), and the plain liveness check at /healthz. Anything not matched here
-// (the SPA's own routes) is left to the caller — see cmd/hoardqr/main.go's
-// spaHandler fallback.
+// JSON), and the liveness check at /healthz (a real Postgres connectivity
+// check as of Phase 3 step 7 — see HealthzHandler). Anything not matched
+// here (the SPA's own routes) is left to the caller — see
+// cmd/hoardqr/main.go's spaHandler fallback.
 func NewRouter(pool *pgxpool.Pool, uploadDir string) chi.Router {
 	r := chi.NewRouter()
 	// RequestLogger outermost, Recoverer inside it — not the other way
@@ -24,10 +25,7 @@ func NewRouter(pool *pgxpool.Pool, uploadDir string) chi.Router {
 	r.Use(RequestLogger)
 	r.Use(middleware.Recoverer)
 
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	r.Get("/healthz", HealthzHandler(pool))
 
 	r.Route("/api/locations", NewLocationsHandler(pool).Routes)
 	r.Route("/api/items", NewItemsHandler(pool).Routes)

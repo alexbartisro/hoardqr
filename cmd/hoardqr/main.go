@@ -140,12 +140,18 @@ func mcp() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", healthz)
+	mux.HandleFunc("GET /healthz", api.HealthzHandler(pool))
 	mux.Handle("/mcp", mcpHandler)
 
 	const addr = ":8081"
 	slog.Info("hoardqr mcp listening", "addr", addr, "path", "/mcp")
-	serveErr := http.ListenAndServe(addr, mux)
+	// RequestLogger (step 3.a) — this mux had no request logging at all
+	// before /healthz could fail (it was a static 200). Now that it can
+	// (step 7's real Postgres check), a failure needs to show up in
+	// `docker logs -f` the same way it already does for `serve`, instead of
+	// HealthzHandler logging it itself and this process's /mcp traffic
+	// staying entirely unlogged either way.
+	serveErr := http.ListenAndServe(addr, api.RequestLogger(mux))
 	pool.Close()
 	fatal("server stopped", "error", serveErr)
 }
@@ -161,11 +167,6 @@ func staticTokenVerifier(expected string) auth.TokenVerifier {
 		}
 		return &auth.TokenInfo{UserID: "configured-user"}, nil
 	}
-}
-
-func healthz(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("ok"))
 }
 
 // spaHandler serves static files from webFS, falling back to index.html for
