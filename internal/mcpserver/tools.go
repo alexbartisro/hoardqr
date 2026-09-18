@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -221,6 +222,13 @@ type addItemOutput struct {
 
 func addItemHandler(q *store.Queries) mcp.ToolHandlerFor[addItemInput, addItemOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in addItemInput) (*mcp.CallToolResult, addItemOutput, error) {
+		// Mirrors internal/api/items.go's create handler's own
+		// strings.TrimSpace(req.Name) == "" check — REST rejects a blank name,
+		// so an MCP caller shouldn't be able to create one either.
+		name := strings.TrimSpace(in.Name)
+		if name == "" {
+			return nil, addItemOutput{}, fmt.Errorf("name is required")
+		}
 		locationID, matchedLocation, err := resolveLocation(ctx, q, in.Location)
 		if err != nil {
 			return nil, addItemOutput{}, err
@@ -233,7 +241,7 @@ func addItemHandler(q *store.Queries) mcp.ToolHandlerFor[addItemInput, addItemOu
 		item, err := q.InsertItem(ctx, store.InsertItemParams{
 			LocationID:   locationID,
 			IsShared:     true, // no auth yet — every row is public until then (see CLAUDE.md)
-			Name:         in.Name,
+			Name:         name,
 			Quantity:     quantity,
 			QrToken:      code,
 			CustomFields: []byte("{}"),
@@ -261,6 +269,14 @@ type addLocationOutput struct {
 
 func addLocationHandler(q *store.Queries) mcp.ToolHandlerFor[addLocationInput, addLocationOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in addLocationInput) (*mcp.CallToolResult, addLocationOutput, error) {
+		// Mirrors internal/api/locations.go's create handler's own
+		// strings.TrimSpace(req.Name) == "" check — REST rejects a blank name,
+		// so an MCP caller shouldn't be able to create one either.
+		name := strings.TrimSpace(in.Name)
+		if name == "" {
+			return nil, addLocationOutput{}, fmt.Errorf("name is required")
+		}
+
 		var parentID *int64
 		if in.Parent != nil {
 			id, _, err := resolveLocation(ctx, q, *in.Parent)
@@ -279,7 +295,7 @@ func addLocationHandler(q *store.Queries) mcp.ToolHandlerFor[addLocationInput, a
 			location, err = q.InsertLocation(ctx, store.InsertLocationParams{
 				ParentID: parentID,
 				IsShared: true, // no auth yet — every row is public until then (see CLAUDE.md)
-				Name:     in.Name,
+				Name:     name,
 				QrToken:  codegen.PlainTextCode(),
 			})
 			if err == nil {

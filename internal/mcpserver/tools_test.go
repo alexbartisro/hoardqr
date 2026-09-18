@@ -189,8 +189,13 @@ func TestMCPToolsEndToEnd(t *testing.T) {
 func requireNoLeftoverTestRows(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	var count int
+	// The third clause catches TestMCPToolsRejectBlankNames's own failure
+	// case: a run where add_location's blank-name check regresses creates a
+	// blank/whitespace-named location, which matches neither 'MCP Test %'
+	// nor 'zzz%' — invisible to this guard otherwise, and it's already bitten
+	// once (caught manually while verifying that fix, not by this check).
 	err := pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM locations WHERE name LIKE 'MCP Test %' OR name LIKE 'zzz%'`,
+		`SELECT count(*) FROM locations WHERE name LIKE 'MCP Test %' OR name LIKE 'zzz%' OR trim(name) = ''`,
 	).Scan(&count)
 	if err != nil {
 		t.Fatalf("checking for leftover test rows: %v", err)
@@ -478,6 +483,84 @@ func TestMCPToolsSearchByKindPreservesAmbiguityAcrossCrowding(t *testing.T) {
 	}
 	if stillHomeBlue != itemHome.ID || stillHomeGreen != itemHome.ID {
 		t.Fatalf("ambiguous move_item call must not have moved anything, got blue.location_id=%d green.location_id=%d", stillHomeBlue, stillHomeGreen)
+	}
+}
+
+// TestMCPToolsRejectBlankNames proves add_item/add_location reject a
+// blank/whitespace-only name the same way the REST layer's create handlers
+// already do (internal/api/items.go, internal/api/locations.go) — an MCP
+// caller shouldn't be able to create a row REST itself would refuse.
+func TestMCPToolsRejectBlankNames(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+	// Defense in depth beyond requireNoLeftoverTestRows: if either rejection
+	// below ever regresses, the resulting row is blank-named and matches
+	// neither this file's 'MCP Test %' nor 'zzz%' conventions — sweep it
+	// unconditionally rather than relying solely on the next run's guard to
+	// notice (a real gap caught once already while developing this fix).
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM items WHERE trim(name) = ''`); err != nil {
+			t.Logf("cleanup: deleting blank-named test items: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM locations WHERE trim(name) = ''`); err != nil {
+			t.Logf("cleanup: deleting blank-named test locations: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM locations WHERE name LIKE 'MCP Test %'`); err != nil {
+			t.Logf("cleanup: deleting test locations: %v", err)
+		}
+	})
+
+	var beforeItems, beforeLocations int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM items`).Scan(&beforeItems); err != nil {
+		t.Fatalf("counting items: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM locations`).Scan(&beforeLocations); err != nil {
+		t.Fatalf("counting locations: %v", err)
+	}
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "add_location",
+		Arguments: map[string]any{"name": "   "},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected add_location to reject a blank name, got success: %s", textOf(t, res))
+	}
+	var afterFirstLocations int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM locations`).Scan(&afterFirstLocations); err != nil {
+		t.Fatalf("counting locations: %v", err)
+	}
+	if afterFirstLocations != beforeLocations {
+		t.Fatalf("expected the rejected add_location call to create nothing, location count went from %d to %d", beforeLocations, afterFirstLocations)
+	}
+
+	// add_item needs a resolvable location to even reach its own name check —
+	// give it a real one so a "no location matching" error can't be mistaken
+	// for the name check actually firing.
+	var loc addLocationOutput
+	callTool(t, cs, "add_location", map[string]any{"name": "MCP Test Blank Name Shelf"}, &loc)
+
+	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "add_item",
+		Arguments: map[string]any{"name": "  ", "location": "MCP Test Blank Name Shelf"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected add_item to reject a blank name, got success: %s", textOf(t, res))
+	}
+
+	var afterItems int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM items`).Scan(&afterItems); err != nil {
+		t.Fatalf("counting items: %v", err)
+	}
+	if afterItems != beforeItems {
+		t.Fatalf("expected the rejected add_item call to create nothing, item count went from %d to %d", beforeItems, afterItems)
 	}
 }
 
