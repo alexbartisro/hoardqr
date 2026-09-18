@@ -14,5 +14,15 @@
 -- ordering bug slipped through the automated tests: the random plain-text
 -- codes used to test it never happened to contain a literal 0 or 1 for the
 -- lowercase substitution to matter.
+-- No pre-check for existing collisions before creating this: there's no
+-- production data yet, so it's a cheap fix now rather than something to
+-- guard against. If this migration is ever run against a database that
+-- already has two locations colliding under normalization, CREATE UNIQUE
+-- INDEX fails, golang-migrate marks schema_migrations dirty at this version,
+-- and both `serve` and `mcp` crash-loop on every subsequent start until it's
+-- fixed manually: find and rename/delete the duplicate
+-- (SELECT TRANSLATE(UPPER(qr_token),'OIL','011'), array_agg(id) FROM
+-- locations GROUP BY 1 HAVING count(*) > 1), then
+-- `migrate force <previous_version>` and re-run `migrate up`.
 CREATE UNIQUE INDEX idx_locations_qr_token_normalized
     ON locations (TRANSLATE(UPPER(qr_token), 'OIL', '011'));

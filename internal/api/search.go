@@ -24,10 +24,12 @@ func NewSearchHandler(pool *pgxpool.Pool) *SearchHandler {
 
 // GET /api/search/suggest?q= (§5) — live autocomplete across items,
 // locations, and tags; item hits include their own location_id + breadcrumb
-// (no second lookup needed on the frontend).
+// (no second lookup needed on the frontend). location_id comes straight off
+// the SearchSuggest row (a LEFT JOIN within that one query, not a separate
+// per-hit round trip) — see the query's own comment for why that matters.
 func (h *SearchHandler) Suggest(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query().Get("q")
-	if strings.TrimSpace(query) == "" {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
 		writeJSON(w, http.StatusOK, []SearchSuggestionDTO{})
 		return
 	}
@@ -41,13 +43,13 @@ func (h *SearchHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	suggestions := make([]SearchSuggestionDTO, len(rows))
 	for i, row := range rows {
 		s := SearchSuggestionDTO{Kind: row.Kind, ID: row.ID, Name: row.Name, Score: row.Score}
-		if row.Kind == "item" {
-			locationID, breadcrumb, err := h.itemLocationAndBreadcrumb(r.Context(), row.ID)
+		if row.Kind == "item" && row.LocationID != nil {
+			breadcrumb, err := h.breadcrumbText(r.Context(), *row.LocationID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-			s.LocationID = &locationID
+			s.LocationID = row.LocationID
 			s.Breadcrumb = &breadcrumb
 		}
 		suggestions[i] = s
@@ -55,27 +57,23 @@ func (h *SearchHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, suggestions)
 }
 
-func (h *SearchHandler) itemLocationAndBreadcrumb(ctx context.Context, itemID int64) (int64, string, error) {
-	locationID, err := h.q.GetItemLocationID(ctx, itemID)
-	if err != nil {
-		return 0, "", err
-	}
+func (h *SearchHandler) breadcrumbText(ctx context.Context, locationID int64) (string, error) {
 	crumb, err := h.q.LocationBreadcrumb(ctx, locationID)
 	if err != nil {
-		return 0, "", err
+		return "", err
 	}
 	names := make([]string, len(crumb))
 	for i, c := range crumb {
 		names[i] = c.Name
 	}
-	return locationID, strings.Join(names, " > "), nil
+	return strings.Join(names, " > "), nil
 }
 
 // GET /api/scan?code= (§6) — resolve a scanned code to item(s), a location,
 // or no match.
 func (h *SearchHandler) Scan(w http.ResponseWriter, r *http.Request) {
-	code := r.URL.Query().Get("code")
-	if strings.TrimSpace(code) == "" {
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	if code == "" {
 		writeError(w, http.StatusBadRequest, "code is required")
 		return
 	}
@@ -107,8 +105,8 @@ func (h *SearchHandler) Scan(w http.ResponseWriter, r *http.Request) {
 // *its* location), or the same ambiguous-items picker as Scan when several
 // items share the code, or none.
 func (h *SearchHandler) ResolveLocation(w http.ResponseWriter, r *http.Request) {
-	code := r.URL.Query().Get("code")
-	if strings.TrimSpace(code) == "" {
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	if code == "" {
 		writeError(w, http.StatusBadRequest, "code is required")
 		return
 	}
