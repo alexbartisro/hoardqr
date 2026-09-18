@@ -3,7 +3,7 @@ WORKDIR /app/web
 COPY web/ .
 RUN npm ci && npm run build              # adapter-static output → build/
 
-FROM golang:1.23-alpine AS backend
+FROM golang:1.25-alpine AS backend
 WORKDIR /app
 COPY . .
 COPY --from=frontend /app/web/build ./web/build
