@@ -64,15 +64,21 @@ type findItemsOutput struct {
 
 func findItemsHandler(q *store.Queries) mcp.ToolHandlerFor[findItemsInput, findItemsOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in findItemsInput) (*mcp.CallToolResult, findItemsOutput, error) {
-		rows, err := q.SearchSuggest(ctx, in.Query)
-		if err != nil {
-			return nil, findItemsOutput{}, err
-		}
+		// SearchSuggestByKind, not SearchSuggest — a shared top-10 across
+		// kinds let a higher-scoring location/tag match crowd out real item
+		// matches entirely (a query could come back empty despite a genuine
+		// match existing). Two separate calls, one per kind actually needed
+		// here, rather than one mixed query filtered in Go. See the Obsidian
+		// backend TODO for the verified failure case.
 		out := findItemsOutput{Items: []foundItem{}}
 		seen := make(map[int64]bool)
 
-		for _, row := range rows {
-			if row.Kind != "item" || row.LocationID == nil {
+		itemRows, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: in.Query, Kind: "item"})
+		if err != nil {
+			return nil, findItemsOutput{}, err
+		}
+		for _, row := range itemRows {
+			if row.LocationID == nil {
 				continue
 			}
 			breadcrumb, err := breadcrumbText(ctx, q, *row.LocationID)
@@ -83,16 +89,16 @@ func findItemsHandler(q *store.Queries) mcp.ToolHandlerFor[findItemsInput, findI
 			seen[row.ID] = true
 		}
 
-		// SearchSuggest's own item/location/tag rows never expand a tag match
-		// into the items carrying it — the description promises "by name, tag,
-		// or code" though, so a query that only matches a tag name (not any
-		// item's own name/code) still needs to surface its items here, via the
-		// same exact-tag lookup ListItems already offers the REST item-browsing
+		// find_items's own description promises matching "by name, tag, or
+		// code" — a query that only matches a tag name (not any item's own
+		// name/code) still needs to surface its items here, via the same
+		// exact-tag lookup ListItems already offers the REST item-browsing
 		// endpoint (§9's Mock API surface gaps, see CLAUDE.md).
-		for _, row := range rows {
-			if row.Kind != "tag" {
-				continue
-			}
+		tagRows, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: in.Query, Kind: "tag"})
+		if err != nil {
+			return nil, findItemsOutput{}, err
+		}
+		for _, row := range tagRows {
 			tag := row.Name
 			taggedItems, err := q.ListItems(ctx, store.ListItemsParams{Tag: &tag})
 			if err != nil {

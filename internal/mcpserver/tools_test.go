@@ -3,13 +3,16 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"hoardqr/internal/codegen"
 	"hoardqr/internal/db"
+	"hoardqr/internal/store"
 )
 
 // testPool mirrors internal/api's testPool — connects to DATABASE_URL_TEST
@@ -177,16 +180,23 @@ func TestMCPToolsEndToEnd(t *testing.T) {
 // failed silently: if it had, resolveItem/resolveLocation's first-match
 // behavior (or, after the ambiguity fix, a spurious "matches more than one"
 // error) would make this run flaky in a way that's hard to diagnose from the
-// failure alone.
+// failure alone. Checks both this file's two test-data naming conventions:
+// 'MCP Test %' (most tests) and 'zzz%' (the SearchSuggestByKind crowding
+// tests below, which need names starting with their query token for
+// prefix-tier scoring, so they can't also carry the 'MCP Test ' prefix) — a
+// handful of leftover 'zzzcord'/'zzzreel' locations would silently become
+// live decoys for any later test querying a similarly short token.
 func requireNoLeftoverTestRows(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	var count int
-	err := pool.QueryRow(context.Background(), `SELECT count(*) FROM locations WHERE name LIKE 'MCP Test %'`).Scan(&count)
+	err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM locations WHERE name LIKE 'MCP Test %' OR name LIKE 'zzz%'`,
+	).Scan(&count)
 	if err != nil {
 		t.Fatalf("checking for leftover test rows: %v", err)
 	}
 	if count > 0 {
-		t.Fatalf("found %d leftover 'MCP Test %%' location(s) from a previous run's failed cleanup — clean up manually before re-running", count)
+		t.Fatalf("found %d leftover test location(s) from a previous run's failed cleanup — clean up manually before re-running", count)
 	}
 }
 
@@ -301,6 +311,138 @@ func TestMCPToolsFindItemsByTag(t *testing.T) {
 	callTool(t, cs, "find_items", map[string]any{"query": "mcptesttag"}, &found)
 	if !containsItem(found.Items, item.ID, "MCP Test Tag Shelf") {
 		t.Fatalf("find_items didn't surface the item via its tag: %+v", found.Items)
+	}
+}
+
+// TestMCPToolsSearchByKindAvoidsFalseNotFound reproduces the false-negative
+// half of the Obsidian backend TODO's SearchSuggest LIMIT-10 finding:
+// resolveItem/resolveLocation used to filter a single SearchSuggest call's
+// shared top-10 (across all kinds) down to the kind they wanted, so enough
+// higher-scoring matches of the WRONG kind could crowd a real match of the
+// RIGHT kind out of the top 10 entirely. 11 locations that prefix-match the
+// query (score 0.8) outnumber the 10-row budget on their own, which used to
+// bury an item that only substring-matches (score 0.5) — where_is would
+// report "not found" despite the item genuinely existing.
+func TestMCPToolsSearchByKindAvoidsFalseNotFound(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	ctx := context.Background()
+	q := store.New(pool)
+	cs := testClient(t, pool)
+
+	var locationIDs []int64
+	for i := 0; i < 11; i++ {
+		loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+			Name: fmt.Sprintf("zzzcord decoy shelf %02d", i), QrToken: codegen.PlainTextCode(), IsShared: true,
+		})
+		if err != nil {
+			t.Fatalf("InsertLocation decoy %d: %v", i, err)
+		}
+		locationIDs = append(locationIDs, loc.ID)
+	}
+	decoyLoc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "zzzcord item's actual home", QrToken: codegen.PlainTextCode(), IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation for item: %v", err)
+	}
+	item, err := q.InsertItem(ctx, store.InsertItemParams{
+		LocationID: decoyLoc.ID, Name: "Extension zzzcord Heavy Duty", QrToken: codegen.PlainTextCode(),
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = ANY($1)`, append(locationIDs, decoyLoc.ID))
+	})
+
+	var where whereIsOutput
+	callTool(t, cs, "where_is", map[string]any{"name": "zzzcord"}, &where)
+	if where.Item != item.Name {
+		t.Fatalf("expected where_is to find %q despite 11 higher-scoring locations, got %+v", item.Name, where)
+	}
+}
+
+// TestMCPToolsSearchByKindPreservesAmbiguityAcrossCrowding reproduces the
+// more serious half of the same finding: the ambiguity-refusal guard
+// (resolveItem/resolveLocation) only compares candidates that actually made
+// it into the SearchSuggest response. With a shared top-10 across kinds, 9
+// locations tied at score 1.0 fill the whole budget except one slot, so of
+// two equally-scored competing items only one survives to be compared — the
+// guard sees a single "candidate" and moves it without ever knowing a tie
+// existed. move_item on an ambiguous name must still refuse once resolution
+// is restricted to the relevant kind first.
+func TestMCPToolsSearchByKindPreservesAmbiguityAcrossCrowding(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	ctx := context.Background()
+	q := store.New(pool)
+	cs := testClient(t, pool)
+
+	var decoyLocationIDs []int64
+	for i := 0; i < 9; i++ {
+		loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+			Name: "zzzreel", QrToken: codegen.PlainTextCode(), IsShared: true,
+		})
+		if err != nil {
+			t.Fatalf("InsertLocation decoy %d: %v", i, err)
+		}
+		decoyLocationIDs = append(decoyLocationIDs, loc.ID)
+	}
+	itemHome, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "zzzreel items' home", QrToken: codegen.PlainTextCode(), IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation for items: %v", err)
+	}
+	moveTarget, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "zzzreel move target", QrToken: codegen.PlainTextCode(), IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation move target: %v", err)
+	}
+	itemBlue, err := q.InsertItem(ctx, store.InsertItemParams{
+		LocationID: itemHome.ID, Name: "zzzreel Blue", QrToken: codegen.PlainTextCode(),
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem blue: %v", err)
+	}
+	itemGreen, err := q.InsertItem(ctx, store.InsertItemParams{
+		LocationID: itemHome.ID, Name: "zzzreel Green", QrToken: codegen.PlainTextCode(),
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem green: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = ANY($1)`, []int64{itemBlue.ID, itemGreen.ID})
+		_, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = ANY($1)`, append(decoyLocationIDs, itemHome.ID, moveTarget.ID))
+	})
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "move_item",
+		Arguments: map[string]any{"item": "zzzreel", "new_location": "zzzreel move target"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected move_item to refuse an ambiguous item name crowded by 9 tied locations, got success: %s", textOf(t, res))
+	}
+
+	// Neither item should have moved — a rejected move must not partially apply.
+	var stillHomeBlue, stillHomeGreen int64
+	if err := pool.QueryRow(ctx, `SELECT location_id FROM items WHERE id = $1`, itemBlue.ID).Scan(&stillHomeBlue); err != nil {
+		t.Fatalf("querying item blue: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT location_id FROM items WHERE id = $1`, itemGreen.ID).Scan(&stillHomeGreen); err != nil {
+		t.Fatalf("querying item green: %v", err)
+	}
+	if stillHomeBlue != itemHome.ID || stillHomeGreen != itemHome.ID {
+		t.Fatalf("ambiguous move_item call must not have moved anything, got blue.location_id=%d green.location_id=%d", stillHomeBlue, stillHomeGreen)
 	}
 }
 

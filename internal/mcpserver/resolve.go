@@ -32,38 +32,36 @@ func ambiguousError(kind, query string, matches []string) error {
 }
 
 // resolveLocation finds the best-matching location for a free-text name or
-// code, built on the same SearchSuggest query (§5) find_items also uses —
-// the same "type a name or code, let fuzzy/exact matching sort it out"
-// principle the web Location Picker (§7) already uses for this exact
-// problem. Returns the location id and its actual name (which may differ
-// from the query, e.g. a fuzzy or case-insensitive match), so callers can
-// tell the caller what was actually resolved rather than echoing back
-// whatever text was passed in. Errors if the top score is tied across two or
-// more locations — see ambiguousError.
+// code, built on the same SearchSuggest matching logic (§5) find_items also
+// uses — the same "type a name or code, let fuzzy/exact matching sort it
+// out" principle the web Location Picker (§7) already uses for this exact
+// problem. Uses SearchSuggestByKind, not SearchSuggest — a shared top-10
+// across kinds let a higher-scoring item/tag match crowd out the location
+// this is actually looking for (or worse, cut a competing same-score
+// location before the tie could even be detected — see the Obsidian backend
+// TODO for the verified failure case). Returns the location id and its
+// actual name (which may differ from the query, e.g. a fuzzy or
+// case-insensitive match), so callers can tell the caller what was actually
+// resolved rather than echoing back whatever text was passed in. Errors if
+// the top score is tied across two or more locations — see ambiguousError.
 func resolveLocation(ctx context.Context, q *store.Queries, name string) (id int64, matchedName string, err error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
 		return 0, "", fmt.Errorf("location name is required")
 	}
-	rows, err := q.SearchSuggest(ctx, trimmed)
+	candidates, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: trimmed, Kind: "location"})
 	if err != nil {
 		return 0, "", err
-	}
-
-	var candidates []store.SearchSuggestRow
-	for _, row := range rows {
-		if row.Kind == "location" {
-			candidates = append(candidates, row)
-		}
 	}
 	if len(candidates) == 0 {
 		return 0, "", fmt.Errorf("no location matching %q found", trimmed)
 	}
 
-	// candidates preserves SearchSuggest's own `ORDER BY score DESC, name`,
-	// so candidates[0] is always a top scorer; find the rest tied with it.
+	// candidates preserves SearchSuggestByKind's own `ORDER BY score DESC,
+	// name`, so candidates[0] is always a top scorer; find the rest tied
+	// with it.
 	best := candidates[0].Score
-	var tied []store.SearchSuggestRow
+	var tied []store.SearchSuggestByKindRow
 	for _, c := range candidates {
 		if best-c.Score < scoreEpsilon {
 			tied = append(tied, c)
@@ -86,36 +84,36 @@ func resolveLocation(ctx context.Context, q *store.Queries, name string) (id int
 
 // resolveItem is resolveLocation's item-side equivalent — also returns the
 // matched item's location_id, since every caller needs it (either to report
-// where the item lives, or as the "from" side of a move). Errors if the top
-// score is tied across two or more items — see ambiguousError.
+// where the item lives, or as the "from" side of a move). Uses
+// SearchSuggestByKind for the same crowding reason documented on
+// resolveLocation above. Errors if the top score is tied across two or more
+// items — see ambiguousError.
 func resolveItem(ctx context.Context, q *store.Queries, name string) (id int64, matchedName string, locationID int64, err error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
 		return 0, "", 0, fmt.Errorf("item name is required")
 	}
-	rows, err := q.SearchSuggest(ctx, trimmed)
+	rows, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: trimmed, Kind: "item"})
 	if err != nil {
 		return 0, "", 0, err
 	}
 
-	var candidates []store.SearchSuggestRow
+	var candidates []store.SearchSuggestByKindRow
 	for _, row := range rows {
-		if row.Kind == "item" {
-			if row.LocationID == nil {
-				// Can't happen given SearchSuggest's LEFT JOIN always supplies
-				// location_id for kind="item" rows, but fail loudly rather than
-				// silently if that invariant ever breaks.
-				return 0, "", 0, fmt.Errorf("item %q has no location_id (data inconsistency)", row.Name)
-			}
-			candidates = append(candidates, row)
+		if row.LocationID == nil {
+			// Can't happen given SearchSuggestByKind's LEFT JOIN always
+			// supplies location_id for kind="item" rows, but fail loudly
+			// rather than silently if that invariant ever breaks.
+			return 0, "", 0, fmt.Errorf("item %q has no location_id (data inconsistency)", row.Name)
 		}
+		candidates = append(candidates, row)
 	}
 	if len(candidates) == 0 {
 		return 0, "", 0, fmt.Errorf("no item matching %q found", trimmed)
 	}
 
 	best := candidates[0].Score
-	var tied []store.SearchSuggestRow
+	var tied []store.SearchSuggestByKindRow
 	for _, c := range candidates {
 		if best-c.Score < scoreEpsilon {
 			tied = append(tied, c)
