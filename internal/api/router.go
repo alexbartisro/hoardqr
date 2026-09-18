@@ -22,5 +22,10 @@ func NewRouter(pool *pgxpool.Pool) chi.Router {
 	r.Route("/api/items", NewItemsHandler(pool).Routes)
 	r.Route("/api/tags", NewTagsHandler(pool).Routes)
 
+	search := NewSearchHandler(pool)
+	r.Get("/api/search/suggest", search.Suggest)
+	r.Get("/api/scan", search.Scan)
+	r.Get("/api/resolve-location", search.ResolveLocation)
+
 	return r
 }

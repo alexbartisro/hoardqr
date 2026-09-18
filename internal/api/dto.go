@@ -158,6 +158,16 @@ func toItemDTOFromContentsRow(r store.ListItemsByLocationIDsRow) ItemDTO {
 	}, r.Tags)
 }
 
+func toItemDTOFromScanRow(r store.FindItemsByNormalizedCodeRow) ItemDTO {
+	return toItemDTO(itemFields{
+		ID: r.ID, LocationID: r.LocationID, OwnerID: r.OwnerID, IsShared: r.IsShared,
+		Name: r.Name, Description: r.Description, Quantity: r.Quantity, Condition: r.Condition,
+		QrToken: r.QrToken, PhotoUrl: r.PhotoUrl, PurchaseDate: r.PurchaseDate,
+		PurchasePrice: r.PurchasePrice, ReceiptUrl: r.ReceiptUrl, CustomFields: r.CustomFields,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}, r.Tags)
+}
+
 func toItemDTOFromRecentRow(r store.ListRecentItemsRow) ItemDTO {
 	return toItemDTO(itemFields{
 		ID: r.ID, LocationID: r.LocationID, OwnerID: r.OwnerID, IsShared: r.IsShared,
@@ -166,6 +176,19 @@ func toItemDTOFromRecentRow(r store.ListRecentItemsRow) ItemDTO {
 		PurchasePrice: r.PurchasePrice, ReceiptUrl: r.ReceiptUrl, CustomFields: r.CustomFields,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}, r.Tags)
+}
+
+// SearchSuggestionDTO mirrors SearchSuggestion in web/src/lib/types.ts.
+// LocationID/Breadcrumb are only ever set on item hits (optional fields on
+// the frontend type) — omitempty so a location/tag hit's JSON simply omits
+// them rather than sending explicit nulls.
+type SearchSuggestionDTO struct {
+	Kind       string  `json:"kind"`
+	ID         int64   `json:"id"`
+	Name       string  `json:"name"`
+	Score      float32 `json:"score"`
+	LocationID *int64  `json:"location_id,omitempty"`
+	Breadcrumb *string `json:"breadcrumb,omitempty"`
 }
 
 type TagDTO struct {
