@@ -2,10 +2,18 @@ package api
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// errHandled is a sentinel a withTx callback can return to mean "roll back
+// (nothing destructive has happened, or shouldn't be kept), but the caller
+// has already written its own status/body — don't also write a 500". Used
+// for control-flow exits like 404/409 discovered partway through a
+// transactional handler.
+var errHandled = errors.New("response already written")
 
 // withTx runs fn inside a transaction, committing on success and rolling
 // back on any error (or panic — pgx.Tx.Rollback is always safe to call after

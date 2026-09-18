@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"hoardqr/internal/store"
@@ -315,6 +317,15 @@ func (h *LocationsHandler) update(w http.ResponseWriter, r *http.Request) {
 // DELETE below) — never blocked, never forced. The only case requiring
 // force=true is a root location that still directly holds items: nowhere to
 // promote them to.
+//
+// Runs as one transaction: promoting (or force-deleting) the direct items
+// and then deleting the location are two-to-three separate statements, and
+// the force branch is destructive — if DeleteLocation failed after
+// DeleteItemsAtLocation had already committed, those items would be gone
+// for good with the location they were deleted from still sitting there.
+// The read that decides which branch to take also happens inside the
+// transaction, so a concurrent reparent/delete of the same location can't
+// race between the check and the write.
 func (h *LocationsHandler) delete(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
@@ -323,44 +334,56 @@ func (h *LocationsHandler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	force := r.URL.Query().Get("force") == "true"
 
-	location, err := h.q.GetLocationByID(r.Context(), id)
-	if isNoRows(err) {
-		notFound(w, "location")
+	var status int
+	var message string
+
+	err = withTx(r.Context(), h.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+
+		location, err := q.GetLocationByID(r.Context(), id)
+		if isNoRows(err) {
+			status, message = http.StatusNotFound, "location not found"
+			return errHandled
+		}
+		if err != nil {
+			return err
+		}
+
+		if location.ParentID != nil {
+			if err := q.PromoteItemsToParent(r.Context(), store.PromoteItemsToParentParams{
+				NewLocationID: *location.ParentID,
+				OldLocationID: id,
+			}); err != nil {
+				return err
+			}
+		} else {
+			count, err := q.CountDirectItemsAtLocation(r.Context(), id)
+			if err != nil {
+				return err
+			}
+			if count > 0 {
+				if !force {
+					status, message = http.StatusConflict,
+						"location holds items directly and has no parent to promote them to — retry with force=true"
+					return errHandled
+				}
+				if err := q.DeleteItemsAtLocation(r.Context(), id); err != nil {
+					return err
+				}
+			}
+		}
+
+		// Same transaction as the promote-or-delete-items branch above — if
+		// this fails, the items move/delete above rolls back with it instead
+		// of being left committed with the location still sitting there.
+		return q.DeleteLocation(r.Context(), id)
+	})
+
+	if errors.Is(err, errHandled) {
+		writeError(w, status, message)
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	if location.ParentID != nil {
-		if err := h.q.PromoteItemsToParent(r.Context(), store.PromoteItemsToParentParams{
-			NewLocationID: *location.ParentID,
-			OldLocationID: id,
-		}); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	} else {
-		count, err := h.q.CountDirectItemsAtLocation(r.Context(), id)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if count > 0 {
-			if !force {
-				writeError(w, http.StatusConflict,
-					"location holds items directly and has no parent to promote them to — retry with force=true")
-				return
-			}
-			if err := h.q.DeleteItemsAtLocation(r.Context(), id); err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-		}
-	}
-
-	if err := h.q.DeleteLocation(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
