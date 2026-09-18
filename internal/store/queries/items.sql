@@ -68,6 +68,13 @@ RETURNING *;
 -- name: DeleteItem :exec
 DELETE FROM items WHERE id = $1;
 
+-- name: UpdateItemLocation :exec
+-- Backs the MCP move_item tool (§11) — a plain reassignment, paired with an
+-- InsertAuditLog call in the same handler (audit_log's first real writer;
+-- §3 defines the table but nothing has written to it before this tool).
+UPDATE items SET location_id = sqlc.arg(location_id)::bigint, updated_at = now()
+WHERE id = sqlc.arg(id)::bigint;
+
 -- name: ItemExists :one
 SELECT EXISTS(SELECT 1 FROM items WHERE id = $1);
 

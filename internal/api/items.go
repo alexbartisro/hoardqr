@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"hoardqr/internal/codegen"
 	"hoardqr/internal/store"
 )
 
@@ -234,7 +235,7 @@ func (h *ItemsHandler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	qrToken := req.QrToken
 	if qrToken == nil {
-		token := generatePlainTextCode()
+		token := codegen.PlainTextCode()
 		qrToken = &token
 	}
 	purchaseDate, err := parseNullableDate(req.PurchaseDate)

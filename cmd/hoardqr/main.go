@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -10,10 +11,13 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/modelcontextprotocol/go-sdk/auth"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"hoardqr/internal/api"
 	"hoardqr/internal/config"
 	"hoardqr/internal/db"
+	"hoardqr/internal/mcpserver"
 	"hoardqr/web"
 )
 
@@ -115,14 +119,44 @@ func mcp() {
 	ctx := context.Background()
 	pool := connectAndMigrate(ctx, cfg)
 
+	mcpServer := mcpserver.New(pool)
+	streamable := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return mcpServer }, nil)
+
+	var mcpHandler http.Handler = streamable
+	if cfg.MCPAPIToken != "" {
+		mcpHandler = auth.RequireBearerToken(
+			staticTokenVerifier(cfg.MCPAPIToken),
+			&auth.RequireBearerTokenOptions{AllowMissingExpiration: true}, // a static, never-expiring token has no exp claim to check
+		)(streamable)
+	} else {
+		// Matches AUTH_REQUIRED=false's existing "insecure but functional for
+		// solo/trusted-network use" default elsewhere in the app — real
+		// deployments set MCP_API_TOKEN (see .env.example).
+		slog.Warn("MCP_API_TOKEN not set — /mcp is unauthenticated")
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
+	mux.Handle("/mcp", mcpHandler)
 
 	const addr = ":8081"
-	slog.Info("hoardqr mcp listening", "addr", addr, "note", "MCP tools not implemented yet")
+	slog.Info("hoardqr mcp listening", "addr", addr, "path", "/mcp")
 	serveErr := http.ListenAndServe(addr, mux)
 	pool.Close()
 	fatal("server stopped", "error", serveErr)
+}
+
+// staticTokenVerifier checks a bearer token against the single configured
+// MCP_API_TOKEN — architecture plan §11's "authenticates as one configured
+// user (a static API token)". The comparison is constant-time so response
+// timing can't leak how much of a guessed token matched.
+func staticTokenVerifier(expected string) auth.TokenVerifier {
+	return func(_ context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
+			return nil, auth.ErrInvalidToken
+		}
+		return &auth.TokenInfo{UserID: "configured-user"}, nil
+	}
 }
 
 func healthz(w http.ResponseWriter, r *http.Request) {

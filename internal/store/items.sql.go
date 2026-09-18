@@ -503,3 +503,21 @@ func (q *Queries) TagNamesForItem(ctx context.Context, itemID int64) ([]string, 
 	}
 	return items, nil
 }
+
+const updateItemLocation = `-- name: UpdateItemLocation :exec
+UPDATE items SET location_id = $1::bigint, updated_at = now()
+WHERE id = $2::bigint
+`
+
+type UpdateItemLocationParams struct {
+	LocationID int64
+	ID         int64
+}
+
+// Backs the MCP move_item tool (§11) — a plain reassignment, paired with an
+// InsertAuditLog call in the same handler (audit_log's first real writer;
+// §3 defines the table but nothing has written to it before this tool).
+func (q *Queries) UpdateItemLocation(ctx context.Context, arg UpdateItemLocationParams) error {
+	_, err := q.db.Exec(ctx, updateItemLocation, arg.LocationID, arg.ID)
+	return err
+}
