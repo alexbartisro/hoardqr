@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -18,6 +18,8 @@ import (
 )
 
 func main() {
+	initLogging()
+
 	mode := "serve"
 	if len(os.Args) > 1 {
 		mode = os.Args[1]
@@ -34,6 +36,34 @@ func main() {
 	}
 }
 
+// initLogging sets the default slog logger for the whole process — plain
+// text, one line per event, readable following the container live with
+// `docker logs -f` (step 3.a) rather than only useful piped through a JSON
+// log processor. LOG_LEVEL (debug/info/warn/error, case-insensitive)
+// optionally overrides the default of info; anything unrecognized is
+// treated as info rather than failing startup over a typo'd env var.
+func initLogging() {
+	level := slog.LevelInfo
+	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level})))
+}
+
+// fatal logs a structured error and exits — the slog equivalent of
+// log.Fatalf, used instead of it so a startup failure has the same line
+// shape as everything else in the log rather than a plain unstructured
+// stdlib-log line.
+func fatal(msg string, args ...any) {
+	slog.Error(msg, args...)
+	os.Exit(1)
+}
+
 // connectAndMigrate is shared by both run modes: each needs its own pool,
 // and applying migrations here (rather than a separate manual step) means
 // there's nothing to remember to run before starting either container —
@@ -42,43 +72,45 @@ func main() {
 func connectAndMigrate(ctx context.Context, cfg config.Config) *pgxpool.Pool {
 	pool, err := db.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("connecting to database: %v", err)
+		fatal("connecting to database", "error", err)
 	}
+	slog.Info("database connected")
 	if err := db.Migrate(cfg.DatabaseURL); err != nil {
-		log.Fatalf("running migrations: %v", err)
+		fatal("running migrations", "error", err)
 	}
+	slog.Info("migrations up to date")
 	return pool
 }
 
 func serve() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("loading config: %v", err)
+		fatal("loading config", "error", err)
 	}
 	ctx := context.Background()
 	pool := connectAndMigrate(ctx, cfg)
 
 	webFS, err := fs.Sub(web.Assets, "build")
 	if err != nil {
-		log.Fatalf("failed to load embedded web assets: %v", err)
+		fatal("loading embedded web assets", "error", err)
 	}
 
 	router := api.NewRouter(pool)
 	router.NotFound(spaHandler(webFS).ServeHTTP)
 
 	const addr = ":8080"
-	log.Printf("hoardqr serve listening on %s", addr)
-	// Captured (not log.Fatal'd directly) so pool.Close() actually runs before
-	// exit — log.Fatal calls os.Exit, which skips defers.
+	slog.Info("hoardqr serve listening", "addr", addr)
+	// Captured (not fatal'd directly) so pool.Close() actually runs before
+	// exit — os.Exit (which fatal calls) skips defers same as log.Fatal did.
 	serveErr := http.ListenAndServe(addr, router)
 	pool.Close()
-	log.Fatal(serveErr)
+	fatal("server stopped", "error", serveErr)
 }
 
 func mcp() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("loading config: %v", err)
+		fatal("loading config", "error", err)
 	}
 	ctx := context.Background()
 	pool := connectAndMigrate(ctx, cfg)
@@ -87,10 +119,10 @@ func mcp() {
 	mux.HandleFunc("GET /healthz", healthz)
 
 	const addr = ":8081"
-	log.Printf("hoardqr mcp listening on %s (MCP tools not implemented yet)", addr)
+	slog.Info("hoardqr mcp listening", "addr", addr, "note", "MCP tools not implemented yet")
 	serveErr := http.ListenAndServe(addr, mux)
 	pool.Close()
-	log.Fatal(serveErr)
+	fatal("server stopped", "error", serveErr)
 }
 
 func healthz(w http.ResponseWriter, r *http.Request) {

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -12,6 +13,14 @@ import (
 // caller — see cmd/hoardqr/main.go's spaHandler fallback.
 func NewRouter(pool *pgxpool.Pool) chi.Router {
 	r := chi.NewRouter()
+	// RequestLogger outermost, Recoverer inside it — not the other way
+	// around: middleware.Recoverer stops a panic from propagating, but if it
+	// wrapped *outside* RequestLogger, RequestLogger's next.ServeHTTP call
+	// would itself panic and its post-call logging code would never run, so
+	// the one request most worth seeing in `docker logs -f` (a 500 from a
+	// panic) would be the one request that never gets logged.
+	r.Use(RequestLogger)
+	r.Use(middleware.Recoverer)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

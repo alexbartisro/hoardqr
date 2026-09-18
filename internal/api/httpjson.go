@@ -6,6 +6,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -34,6 +35,18 @@ func writeError(w http.ResponseWriter, status int, message string) {
 
 func notFound(w http.ResponseWriter, entity string) {
 	writeError(w, http.StatusNotFound, entity+" not found")
+}
+
+// serverError logs the real error server-side (visible via `docker logs -f`,
+// step 3.a) and sends the client a generic message instead of the raw error
+// text — a Postgres driver error or a Go error string is an implementation
+// detail an API caller shouldn't see, and previously every 500 in this
+// package sent exactly that. Every internal-error path in this package
+// should go through this, not a bare writeError(w, 500, err.Error()).
+func serverError(w http.ResponseWriter, r *http.Request, err error) {
+	slog.ErrorContext(r.Context(), "internal server error",
+		"method", r.Method, "path", r.URL.Path, "error", err)
+	writeError(w, http.StatusInternalServerError, "internal server error")
 }
 
 // pgConflict reports whether err is a Postgres unique-violation (23505),

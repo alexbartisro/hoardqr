@@ -36,7 +36,7 @@ func (h *SearchHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.q.SearchSuggest(r.Context(), query)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 
@@ -46,7 +46,7 @@ func (h *SearchHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 		if row.Kind == "item" && row.LocationID != nil {
 			breadcrumb, err := h.breadcrumbText(r.Context(), *row.LocationID)
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
+				serverError(w, r, err)
 				return
 			}
 			s.LocationID = row.LocationID
@@ -80,7 +80,7 @@ func (h *SearchHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 	items, err := h.q.FindItemsByNormalizedCode(r.Context(), code)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	if len(items) > 0 {
@@ -94,7 +94,7 @@ func (h *SearchHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"kind": "location", "location": toLocationDTO(location)})
@@ -113,7 +113,7 @@ func (h *SearchHandler) ResolveLocation(w http.ResponseWriter, r *http.Request) 
 
 	items, err := h.q.FindItemsByNormalizedCode(r.Context(), code)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	if len(items) == 1 {
@@ -131,7 +131,7 @@ func (h *SearchHandler) ResolveLocation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"kind": "location", "location_id": location.ID})

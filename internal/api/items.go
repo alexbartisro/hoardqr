@@ -66,7 +66,7 @@ func (h *ItemsHandler) list(w http.ResponseWriter, r *http.Request) {
 		Tag:        tag,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	items := make([]ItemDTO, len(rows))
@@ -96,12 +96,12 @@ func (h *ItemsHandler) listRecent(w http.ResponseWriter, r *http.Request) {
 		Offset: (page - 1) * pageSize,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	total, err := h.q.CountItems(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 
@@ -116,7 +116,7 @@ func (h *ItemsHandler) listRecent(w http.ResponseWriter, r *http.Request) {
 		// the immediate location is the more useful headline than the root.
 		crumb, err := h.q.LocationBreadcrumb(r.Context(), row.LocationID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			serverError(w, r, err)
 			return
 		}
 		names := make([]string, len(crumb))
@@ -141,12 +141,12 @@ func (h *ItemsHandler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	breadcrumbRows, err := h.q.LocationBreadcrumb(r.Context(), row.LocationID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	breadcrumb := make([]BreadcrumbEntryDTO, len(breadcrumbRows))
@@ -216,7 +216,7 @@ func (h *ItemsHandler) create(w http.ResponseWriter, r *http.Request) {
 
 	exists, err := h.q.LocationExists(r.Context(), req.LocationID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	if !exists {
@@ -287,7 +287,7 @@ func (h *ItemsHandler) create(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, toItemDTOFromItem(item, tagNames))
@@ -331,7 +331,7 @@ func (h *ItemsHandler) update(w http.ResponseWriter, r *http.Request) {
 			}
 			exists, err := h.q.LocationExists(r.Context(), v)
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
+				serverError(w, r, err)
 				return
 			}
 			if !exists {
@@ -461,7 +461,7 @@ func (h *ItemsHandler) update(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "conflict updating item")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 
@@ -471,7 +471,7 @@ func (h *ItemsHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toItemDTOFromGetRow(row))
@@ -486,7 +486,7 @@ func (h *ItemsHandler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	exists, err := h.q.ItemExists(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	if !exists {
@@ -494,7 +494,7 @@ func (h *ItemsHandler) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.q.DeleteItem(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -31,7 +31,7 @@ func (h *TagsHandler) Routes(r chi.Router) {
 func (h *TagsHandler) list(w http.ResponseWriter, r *http.Request) {
 	tags, err := h.q.ListTags(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toTagDTOs(tags))
@@ -70,7 +70,7 @@ func (h *TagsHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !isNoRows(err) {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 
@@ -81,14 +81,14 @@ func (h *TagsHandler) create(w http.ResponseWriter, r *http.Request) {
 		// rather than erroring on what the caller sees as a normal outcome.
 		existing, err := h.q.GetTagByNameCI(r.Context(), trimmed)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			serverError(w, r, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, toTagDTO(existing))
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		serverError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, toTagDTO(tag))
