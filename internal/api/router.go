@@ -8,10 +8,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// NewRouter mounts every handler under /api and the plain liveness check at
-// /healthz. Anything not matched here (the SPA's own routes) is left to the
-// caller — see cmd/hoardqr/main.go's spaHandler fallback.
-func NewRouter(pool *pgxpool.Pool) chi.Router {
+// NewRouter mounts every handler under /api, uploaded-photo static serving
+// at /uploads/ (§12 — separate from /api since it's plain file serving, not
+// JSON), and the plain liveness check at /healthz. Anything not matched here
+// (the SPA's own routes) is left to the caller — see cmd/hoardqr/main.go's
+// spaHandler fallback.
+func NewRouter(pool *pgxpool.Pool, uploadDir string) chi.Router {
 	r := chi.NewRouter()
 	// RequestLogger outermost, Recoverer inside it — not the other way
 	// around: middleware.Recoverer stops a panic from propagating, but if it
@@ -30,11 +32,14 @@ func NewRouter(pool *pgxpool.Pool) chi.Router {
 	r.Route("/api/locations", NewLocationsHandler(pool).Routes)
 	r.Route("/api/items", NewItemsHandler(pool).Routes)
 	r.Route("/api/tags", NewTagsHandler(pool).Routes)
+	r.Route("/api/photos", NewPhotosHandler(uploadDir).Routes)
 
 	search := NewSearchHandler(pool)
 	r.Get("/api/search/suggest", search.Suggest)
 	r.Get("/api/scan", search.Scan)
 	r.Get("/api/resolve-location", search.ResolveLocation)
+
+	r.Handle("/uploads/*", http.StripPrefix("/uploads/", uploadsFileServer(uploadDir)))
 
 	return r
 }

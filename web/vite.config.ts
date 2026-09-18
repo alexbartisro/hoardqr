@@ -13,7 +13,12 @@ export default defineConfig({
 		// VITE_API_PROXY_TARGET if it's running elsewhere.
 		proxy: {
 			'/api': process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:8080',
-			'/healthz': process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:8080'
+			'/healthz': process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:8080',
+			// Uploaded photos (§12) are served from /uploads/, not /api/ — same
+			// reasoning as the two routes above: without this, an <img src>
+			// pointing at a photo_url resolves against Vite's own origin (5173)
+			// instead of the Go server that actually has the file.
+			'/uploads': process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:8080'
 		}
 	},
 	plugins: [

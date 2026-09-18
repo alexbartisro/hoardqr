@@ -37,6 +37,7 @@
 		"vite": "^8.0.16"
 	},
 	"dependencies": {
+		"browser-image-compression": "^2.0.2",
 		"html5-qrcode": "^2.3.8",
 		"jsbarcode": "^3.12.3",
 		"qrcode": "^1.5.4",

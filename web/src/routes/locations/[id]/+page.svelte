@@ -4,16 +4,18 @@
 	// (getLocationContents in $lib/api.ts), where scanning a box should surface
 	// everything nested inside it in one shot rather than one level at a time.
 	import { page } from '$app/state';
-	import { getItems, getLocation, getLocations } from '$lib/api';
+	import { getItems, getLocation, getLocations, updateLocation } from '$lib/api';
 	import type { Breadcrumb, Item, Location } from '$lib/types';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
+	import PhotoUpload from '$lib/components/photo-upload.svelte';
 
 	let location = $state<Location | null>(null);
 	let breadcrumb = $state<Breadcrumb>([]);
 	let children = $state<Location[]>([]);
 	let items = $state<Item[]>([]);
 	let loadError = $state<string | null>(null);
+	let photoSaveError = $state<string | null>(null);
 
 	// See items/[id]'s loadSeq comment — same stale-response guard.
 	let loadSeq = 0;
@@ -35,6 +37,18 @@
 				loadError = e instanceof Error ? e.message : 'Failed to load location.';
 			});
 	});
+
+	// See items/[id]'s handlePhotoChange — same reasoning: PhotoUpload already
+	// persisted the file itself, this just saves the resulting URL.
+	async function handlePhotoChange(photoUrl: string | null) {
+		if (!location) return;
+		photoSaveError = null;
+		try {
+			await updateLocation(location.id, { photo_url: photoUrl });
+		} catch (e) {
+			photoSaveError = e instanceof Error ? e.message : 'Failed to save photo.';
+		}
+	}
 </script>
 
 <div class="flex flex-col gap-4">
@@ -52,6 +66,11 @@
 				<span class="font-medium">{location.name}</span>
 			</div>
 			<Button variant="outline" size="sm" href="/locations/{location.id}/label">Print label</Button>
+		</div>
+
+		<div>
+			<PhotoUpload bind:photoUrl={location.photo_url} onchange={handlePhotoChange} />
+			{#if photoSaveError}<p class="text-destructive mt-1 text-xs">{photoSaveError}</p>{/if}
 		</div>
 
 		{#if children.length > 0}

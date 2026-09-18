@@ -94,12 +94,16 @@ func serve() {
 	ctx := context.Background()
 	pool := connectAndMigrate(ctx, cfg)
 
+	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
+		fatal("creating upload directory", "error", err, "dir", cfg.UploadDir)
+	}
+
 	webFS, err := fs.Sub(web.Assets, "build")
 	if err != nil {
 		fatal("loading embedded web assets", "error", err)
 	}
 
-	router := api.NewRouter(pool)
+	router := api.NewRouter(pool, cfg.UploadDir)
 	router.NotFound(spaHandler(webFS).ServeHTTP)
 
 	const addr = ":8080"

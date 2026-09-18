@@ -7,6 +7,7 @@
 	import { createItem, createTag, getLocation, getTags } from '$lib/api';
 	import type { Tag } from '$lib/types';
 	import LocationPicker from '$lib/components/location-picker.svelte';
+	import PhotoUpload from '$lib/components/photo-upload.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Card from '$lib/components/ui/card';
@@ -57,6 +58,7 @@
 		condition: string;
 		purchaseDate: string;
 		purchasePrice: string;
+		photoUrl: string | null;
 		tags: Set<string>;
 		tagQuery: string;
 		tagOpen: boolean;
@@ -72,6 +74,7 @@
 			condition: '',
 			purchaseDate: '',
 			purchasePrice: '',
+			photoUrl: null,
 			tags: new Set(),
 			tagQuery: '',
 			tagOpen: false
@@ -200,6 +203,7 @@
 						condition: draft.condition.trim() || null,
 						purchase_date: draft.purchaseDate || null,
 						purchase_price: priceInput && !Number.isNaN(parsedPrice) ? parsedPrice : null,
+						photo_url: draft.photoUrl,
 						tags: [...draft.tags],
 						// One physical scan corresponds to one physical object, even
 						// when several different objects are stored in the same visit
@@ -295,6 +299,11 @@
 								rows="3"
 								class="border-input focus-visible:border-ring focus-visible:ring-ring/50 rounded-md border bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:ring-3"
 							></textarea>
+						</div>
+
+						<div class="flex flex-col gap-1.5">
+							<span class="text-sm font-medium">Photo</span>
+							<PhotoUpload bind:photoUrl={draft.photoUrl} />
 						</div>
 
 						<div class="flex flex-col gap-1.5">

@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { deleteItem, getItemById } from '$lib/api';
+	import { deleteItem, getItemById, updateItem } from '$lib/api';
 	import type { Breadcrumb, Item } from '$lib/types';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
+	import PhotoUpload from '$lib/components/photo-upload.svelte';
 
 	let item = $state<Item | null>(null);
 	let breadcrumb = $state<Breadcrumb>([]);
@@ -42,6 +43,22 @@
 				loadError = e instanceof Error ? e.message : 'Failed to load item.';
 			});
 	});
+
+	let photoSaveError = $state<string | null>(null);
+
+	// PhotoUpload already persists the file server-side (POST /api/photos)
+	// before this fires — this only saves the resulting URL onto the item
+	// itself. There's no surrounding edit form/submit step on this page to
+	// piggyback on, so this saves immediately rather than waiting for one.
+	async function handlePhotoChange(photoUrl: string | null) {
+		if (!item) return;
+		photoSaveError = null;
+		try {
+			await updateItem(item.id, { photo_url: photoUrl });
+		} catch (e) {
+			photoSaveError = e instanceof Error ? e.message : 'Failed to save photo.';
+		}
+	}
 
 	async function handleDelete() {
 		if (!item || !confirm(`Delete "${item.name}"?`)) return;
@@ -99,6 +116,11 @@
 				{#if item.description}<Card.Description>{item.description}</Card.Description>{/if}
 			</Card.Header>
 			<Card.Content class="mt-4 flex flex-col gap-2 p-0 text-sm">
+				<div class="mb-2">
+					<PhotoUpload bind:photoUrl={item.photo_url} onchange={handlePhotoChange} />
+					{#if photoSaveError}<p class="text-destructive mt-1 text-xs">{photoSaveError}</p>{/if}
+				</div>
+
 				<div class="flex justify-between">
 					<span class="text-muted-foreground">Quantity</span><span>{item.quantity}</span>
 				</div>

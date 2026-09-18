@@ -85,7 +85,7 @@ func TestLocationUpdateRejectsParentCycle(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	q := store.New(pool)
-	router := NewRouter(pool)
+	router := NewRouter(pool, t.TempDir())
 
 	root, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "cycle test root", QrToken: "CYCLETEST-ROOT", IsShared: true})
 	if err != nil {

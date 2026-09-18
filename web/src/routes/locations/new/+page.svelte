@@ -8,6 +8,7 @@
 	import { goto } from '$app/navigation';
 	import { createLocation } from '$lib/api';
 	import LocationPicker from '$lib/components/location-picker.svelte';
+	import PhotoUpload from '$lib/components/photo-upload.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Card from '$lib/components/ui/card';
@@ -26,6 +27,7 @@
 	let breadcrumb = $state('');
 
 	let name = $state('');
+	let photoUrl = $state<string | null>(null);
 	let submitting = $state(false);
 	let error = $state<string | null>(null);
 
@@ -35,6 +37,7 @@
 		parentId = null;
 		breadcrumb = '';
 		name = '';
+		photoUrl = null;
 	}
 
 	async function submit() {
@@ -45,6 +48,7 @@
 			const created = await createLocation({
 				name: name.trim(),
 				parent_id: parentId,
+				photo_url: photoUrl,
 				...(scannedCode ? { qr_token: scannedCode } : {})
 			});
 			resetForm();
@@ -80,6 +84,11 @@
 			<div class="flex flex-col gap-1.5">
 				<label for="name" class="text-sm font-medium">Name</label>
 				<Input id="name" bind:value={name} placeholder="e.g. Storage Cabinet" />
+			</div>
+
+			<div class="flex flex-col gap-1.5">
+				<span class="text-sm font-medium">Photo</span>
+				<PhotoUpload bind:photoUrl />
 			</div>
 
 			{#if error}<p class="text-destructive text-sm">{error}</p>{/if}

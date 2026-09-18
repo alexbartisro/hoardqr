@@ -14,9 +14,13 @@ import { USERS } from './fixtures';
 import { ApiError, type Breadcrumb, type Item, type Location, type ResolveLocationResult, type ScanResult, type SearchSuggestion, type Tag, type User } from './types';
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+	// A FormData body (photo upload) must NOT get a Content-Type set here —
+	// the browser needs to set its own `multipart/form-data; boundary=...`,
+	// which it only does when the header is left absent.
+	const isFormData = init.body instanceof FormData;
 	const res = await fetch(path, {
 		...init,
-		headers: init.body ? { 'Content-Type': 'application/json', ...init.headers } : init.headers
+		headers: init.body && !isFormData ? { 'Content-Type': 'application/json', ...init.headers } : init.headers
 	});
 	if (!res.ok) {
 		let message = res.statusText;
@@ -101,6 +105,19 @@ export async function getTags(): Promise<Tag[]> {
 // mock had. ---
 export async function createTag(name: string): Promise<Tag> {
 	return apiFetch('/api/tags', { method: 'POST', body: JSON.stringify({ name }) });
+}
+
+// --- POST /api/photos — not in §9's table (see CLAUDE.md); the architecture
+// plan designs the storage/serving shape in §12 but not this endpoint
+// itself. Takes an already-client-compressed File/Blob (see
+// $lib/components/photo-upload.svelte, which runs browser-image-compression
+// before calling this) and returns the URL to set as an item's or
+// location's photo_url via the normal create/update calls — this endpoint
+// never touches those tables itself. ---
+export async function uploadPhoto(file: Blob): Promise<{ photo_url: string }> {
+	const formData = new FormData();
+	formData.set('photo', file, 'photo');
+	return apiFetch('/api/photos', { method: 'POST', body: formData });
 }
 
 // --- GET /api/items/:id — not in §9's table (see CLAUDE.md). ---
