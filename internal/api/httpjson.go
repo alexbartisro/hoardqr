@@ -54,8 +54,31 @@ func serverError(w http.ResponseWriter, r *http.Request, err error) {
 // source of truth here, not a separate SELECT-then-INSERT check, which
 // would leave a race window between the check and the insert.
 func pgConflict(err error) bool {
+	return pgErrorCode(err) == "23505"
+}
+
+// pgForeignKeyViolation reports whether err is a Postgres foreign-key
+// violation (23503) — used where a pre-check (like LocationExists) isn't
+// the shape of the fix, e.g. items.go's PATCH: by the time LinkItemTag
+// fires this, resolveTagIDs already succeeded, so the only FK left that
+// could still fail is item_tags.item_id referencing an item deleted
+// between this request's id being parsed and the transaction running.
+func pgForeignKeyViolation(err error) bool {
+	return pgErrorCode(err) == "23503"
+}
+
+// pgNumericOutOfRange reports whether err is Postgres's numeric_value_out_of_range
+// (22003) — e.g. a purchase_price too large for NUMERIC(10,2).
+func pgNumericOutOfRange(err error) bool {
+	return pgErrorCode(err) == "22003"
+}
+
+func pgErrorCode(err error) string {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	if !errors.As(err, &pgErr) {
+		return ""
+	}
+	return pgErr.Code
 }
 
 // isNoRows reports whether err is pgx's "no rows in result set" — the

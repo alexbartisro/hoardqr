@@ -315,3 +315,56 @@ func TestLocationUpdateRejectsBlankName(t *testing.T) {
 		t.Fatalf("expected the name to be untouched, got %q", got.Name)
 	}
 }
+
+// TestLocationCreateRejectsNonexistentParent proves a nonexistent parent_id
+// gets a clean 422, not a raw FK violation surfacing as a 500 — mirrors
+// ItemsHandler's existing LocationExists pre-check for location_id, closing
+// the gap where locations and items used to disagree on this. Split from
+// the update version below (rather than one test covering both) so a
+// failure in one half doesn't prevent the other half from ever running via
+// t.Fatalf's early return — a revert-check against only the create fix
+// would otherwise never exercise the update path.
+func TestLocationCreateRejectsNonexistentParent(t *testing.T) {
+	pool := testPool(t)
+	router := NewRouter(pool, t.TempDir())
+
+	const bogusParentID = 999999999
+	body := fmt.Sprintf(`{"name": "orphan create test", "parent_id": %d}`, bogusParentID)
+	req := httptest.NewRequest(http.MethodPost, "/api/locations", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for a nonexistent parent_id, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestLocationUpdateRejectsNonexistentParent is
+// TestLocationCreateRejectsNonexistentParent's PATCH equivalent — see its
+// comment for why this is a separate test rather than a second half.
+func TestLocationUpdateRejectsNonexistentParent(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "orphan update test", QrToken: "ORPHANPARENT-LOC", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID); err != nil {
+			t.Logf("cleanup: deleting test location: %v", err)
+		}
+	})
+
+	const bogusParentID = 999999999
+	body := fmt.Sprintf(`{"parent_id": %d}`, bogusParentID)
+	req := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/api/locations/%d", loc.ID), strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for a nonexistent parent_id, got %d: %s", rec.Code, rec.Body.String())
+	}
+}

@@ -327,6 +327,16 @@ func (h *ItemsHandler) create(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err != nil {
+		// Same numeric-overflow exposure as update() — a purchase_price too
+		// large for NUMERIC(10,2) fails inside InsertItem, not LinkItemTag
+		// (unlike update's FK case, there's no equivalent "item vanished
+		// mid-request" risk here: InsertItem runs first in this same
+		// transaction, so item.ID always refers to a row that genuinely
+		// exists for the rest of it).
+		if pgNumericOutOfRange(err) {
+			writeError(w, http.StatusBadRequest, "a numeric field (e.g. purchase_price) is out of range")
+			return
+		}
 		serverError(w, r, err)
 		return
 	}
@@ -510,6 +520,21 @@ func (h *ItemsHandler) update(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if pgConflict(err) {
 			writeError(w, http.StatusConflict, "conflict updating item")
+			return
+		}
+		// Only reachable via item_tags.item_id: resolveTagIDs above already
+		// succeeded (so tag_id is valid), and this is the only other FK
+		// LinkItemTag has. The item existed when this request's id was
+		// parsed but was deleted before the transaction ran — a plain
+		// update with no tags wouldn't hit this at all (a no-op UPDATE
+		// affecting 0 rows isn't an error), so this is the tags-specific
+		// version of the same "item vanished mid-request" outcome.
+		if pgForeignKeyViolation(err) {
+			notFound(w, "item")
+			return
+		}
+		if pgNumericOutOfRange(err) {
+			writeError(w, http.StatusBadRequest, "a numeric field (e.g. purchase_price) is out of range")
 			return
 		}
 		serverError(w, r, err)

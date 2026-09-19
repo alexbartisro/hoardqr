@@ -161,6 +161,24 @@ func (h *LocationsHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	// Mirrors ItemsHandler.create's LocationExists pre-check for location_id
+	// — without it, a nonexistent parent_id fell through to a raw FK
+	// violation (23503) and a generic 500 instead of a clean 422, unlike
+	// items, which already pre-checks. Same "check first" reasoning as
+	// items: a location doesn't get deleted out from under a create request
+	// often enough for the pgConflict-style "let the DB constraint be the
+	// race-free source of truth" argument to outweigh a clean error here.
+	if req.ParentID != nil {
+		exists, err := h.q.LocationExists(r.Context(), *req.ParentID)
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		if !exists {
+			writeError(w, http.StatusUnprocessableEntity, "parent location does not exist")
+			return
+		}
+	}
 
 	isShared := true
 	if req.IsShared != nil {
@@ -314,6 +332,19 @@ func (h *LocationsHandler) update(w http.ResponseWriter, r *http.Request) {
 	// already includes id itself, so membership in that set is exactly the
 	// "would cycle" condition, with no extra query needed.
 	if newParentID, ok := set["parent_id"].(*int64); ok && newParentID != nil {
+		// Mirrors create's LocationExists pre-check — without it, a
+		// nonexistent parent_id fell through to a raw FK violation (23503)
+		// and a generic 500 instead of a clean 422.
+		exists, err := h.q.LocationExists(r.Context(), *newParentID)
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		if !exists {
+			writeError(w, http.StatusUnprocessableEntity, "parent location does not exist")
+			return
+		}
+
 		descendantIDs, err := h.q.DescendantLocationIDs(r.Context(), id)
 		if err != nil {
 			serverError(w, r, err)

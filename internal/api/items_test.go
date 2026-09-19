@@ -372,3 +372,98 @@ func TestItemsQueryEscapesLikeMetacharacters(t *testing.T) {
 		t.Fatalf("expected both fixture items with no q filter, got %+v", items)
 	}
 }
+
+// TestItemUpdateWithTagsOnNonexistentItemReturns404 proves PATCHing tags
+// onto a nonexistent item id gets a clean 404, not a raw item_tags.item_id
+// foreign-key violation surfacing as a 500. A plain update with no tags
+// already 404s for a nonexistent id (a no-op UPDATE affecting 0 rows isn't
+// an error, but the later GetItemByID is) — this is the tags-specific
+// version of the same outcome, which used to disagree.
+func TestItemUpdateWithTagsOnNonexistentItemReturns404(t *testing.T) {
+	pool := testPool(t)
+	router := NewRouter(pool, t.TempDir())
+
+	const bogusItemID = 999999999
+	req := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/api/items/%d", bogusItemID), strings.NewReader(`{"tags": ["orphan-tag-test"]}`))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// The tag insert happens inside the same transaction as the failing
+	// LinkItemTag call — confirms it rolled back rather than leaving an
+	// orphaned tag behind.
+	exists, err := store.New(pool).GetTagByNameCI(context.Background(), "orphan-tag-test")
+	if err == nil {
+		t.Fatalf("expected the tag insert to roll back with the rest of the transaction, but it exists: %+v", exists)
+	} else if !isNoRows(err) {
+		t.Fatalf("GetTagByNameCI: %v", err)
+	}
+}
+
+// TestItemUpdateRejectsPurchasePriceOutOfRange proves a purchase_price too
+// large for NUMERIC(10,2) gets a clean 400, not a raw
+// numeric_value_out_of_range surfacing as a 500.
+func TestItemUpdateRejectsPurchasePriceOutOfRange(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "price overflow test root", QrToken: "PRICEOVERFLOW-LOC", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	item, err := q.InsertItem(ctx, store.InsertItemParams{
+		LocationID: loc.ID, Name: "price overflow test item", QrToken: "PRICEOVERFLOW-ITEM",
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID)
+	})
+
+	// NUMERIC(10,2) allows at most 8 digits before the decimal point.
+	req := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/api/items/%d", item.ID), strings.NewReader(`{"purchase_price": 1000000000000.00}`))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestItemCreateRejectsPurchasePriceOutOfRange is create's equivalent of
+// TestItemUpdateRejectsPurchasePriceOutOfRange — the same NUMERIC(10,2)
+// overflow can happen on create too (InsertItem, not LinkItemTag), and
+// needed the identical fix.
+func TestItemCreateRejectsPurchasePriceOutOfRange(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "create price overflow test root", QrToken: "PRICEOVERFLOW-CREATE-LOC", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM items WHERE location_id = $1`, loc.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID)
+	})
+
+	body := fmt.Sprintf(`{"name": "price overflow create item", "location_id": %d, "purchase_price": 1000000000000.00}`, loc.ID)
+	req := httptest.NewRequest(http.MethodPost, "/api/items", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
