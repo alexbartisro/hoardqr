@@ -285,3 +285,90 @@ func TestRecentItemsCapsPageSize(t *testing.T) {
 		t.Fatalf("expected total to reflect the true row count (>= %d), got %d — the cap should only bound the page, not the total", fixtureCount, body.Total)
 	}
 }
+
+// TestItemsQueryEscapesLikeMetacharacters proves GET /api/items?q= treats a
+// literal "%" or "_" in the search term literally instead of as a SQL LIKE
+// wildcard — before this fix, q=% matched every item and q=_amme_ matched
+// "Hammer" regardless of what actually preceded/followed those characters.
+func TestItemsQueryEscapesLikeMetacharacters(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "like escape test root", QrToken: "LIKEESC-LOC", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	hammer, err := q.InsertItem(ctx, store.InsertItemParams{
+		LocationID: loc.ID, Name: "Hammer", QrToken: "LIKEESC-HAMMER",
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem hammer: %v", err)
+	}
+	percentItem, err := q.InsertItem(ctx, store.InsertItemParams{
+		LocationID: loc.ID, Name: "50% Off Coupon", QrToken: "LIKEESC-PERCENT",
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem percent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = ANY($1)`, []int64{hammer.ID, percentItem.ID})
+		_, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID)
+	})
+
+	// A literal "%" query must not match every item — only the one that
+	// actually contains a "%" character.
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/items?location_id=%d&q=%%25", loc.ID), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var items []ItemDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != percentItem.ID {
+		t.Fatalf("expected q=%% to match only %q, got %+v", percentItem.Name, items)
+	}
+
+	// A literal "_amme_" query must not wildcard-match "Hammer" via _ standing
+	// in for any single character — it must not match at all.
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/items?location_id=%d&q=_amme_", loc.ID), nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	items = nil
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected q=_amme_ to match nothing (not wildcard-match %q), got %+v", hammer.Name, items)
+	}
+
+	// No q at all must still return everything — the escaped-q scalar
+	// subquery runs regardless of whether q was provided (replace(NULL, …)
+	// yields NULL, and `q IS NULL OR ...` short-circuits on the NULL check
+	// before ever evaluating the NULL-valued ILIKE), so this pins that the
+	// CTE didn't accidentally make the no-q path depend on it.
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/items?location_id=%d", loc.ID), nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	items = nil
+	if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected both fixture items with no q filter, got %+v", items)
+	}
+}

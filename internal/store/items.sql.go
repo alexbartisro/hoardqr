@@ -216,12 +216,15 @@ func (q *Queries) LinkItemTag(ctx context.Context, arg LinkItemTagParams) error 
 }
 
 const listItems = `-- name: ListItems :many
+WITH params AS (
+    SELECT replace(replace(replace($2::text, '\', '\\'), '%', '\%'), '_', '\_') AS q_escaped
+)
 SELECT i.id, i.location_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
 WHERE ($1::bigint IS NULL OR i.location_id = $1)
-  AND ($2::text IS NULL OR i.name ILIKE '%' || $2 || '%')
+  AND ($2::text IS NULL OR i.name ILIKE '%' || (SELECT q_escaped FROM params) || '%' ESCAPE '\')
   AND (
     $3::text IS NULL OR EXISTS (
       SELECT 1 FROM item_tags it2
@@ -261,6 +264,12 @@ type ListItemsRow struct {
 
 // location_id/q/tag are all optional filters (§9) — sqlc.narg + the
 // "IS NULL OR ..." pattern lets one static query cover every combination.
+// q is LIKE-escaped the same way search.sql's SearchSuggest already is
+// (backslash doubled first, then % and _ escaped, matched with ESCAPE '\')
+// so a literal "%" or "_" in a search term matches literally instead of
+// acting as a wildcard — this query used to pass q straight into ILIKE
+// unescaped (q=% matched every item; q=_amme_ matched "Hammer"). The
+// params CTE mirrors search.sql's own naming for the same computation.
 func (q *Queries) ListItems(ctx context.Context, arg ListItemsParams) ([]ListItemsRow, error) {
 	rows, err := q.db.Query(ctx, listItems, arg.LocationID, arg.Q, arg.Tag)
 	if err != nil {

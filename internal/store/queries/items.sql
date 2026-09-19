@@ -13,12 +13,21 @@ GROUP BY i.id;
 -- name: ListItems :many
 -- location_id/q/tag are all optional filters (§9) — sqlc.narg + the
 -- "IS NULL OR ..." pattern lets one static query cover every combination.
+-- q is LIKE-escaped the same way search.sql's SearchSuggest already is
+-- (backslash doubled first, then % and _ escaped, matched with ESCAPE '\')
+-- so a literal "%" or "_" in a search term matches literally instead of
+-- acting as a wildcard — this query used to pass q straight into ILIKE
+-- unescaped (q=% matched every item; q=_amme_ matched "Hammer"). The
+-- params CTE mirrors search.sql's own naming for the same computation.
+WITH params AS (
+    SELECT replace(replace(replace(sqlc.narg('q')::text, '\', '\\'), '%', '\%'), '_', '\_') AS q_escaped
+)
 SELECT i.*, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
 WHERE (sqlc.narg('location_id')::bigint IS NULL OR i.location_id = sqlc.narg('location_id'))
-  AND (sqlc.narg('q')::text IS NULL OR i.name ILIKE '%' || sqlc.narg('q') || '%')
+  AND (sqlc.narg('q')::text IS NULL OR i.name ILIKE '%' || (SELECT q_escaped FROM params) || '%' ESCAPE '\')
   AND (
     sqlc.narg('tag')::text IS NULL OR EXISTS (
       SELECT 1 FROM item_tags it2
