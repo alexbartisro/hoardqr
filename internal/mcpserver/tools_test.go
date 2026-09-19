@@ -725,6 +725,13 @@ func TestMCPToolsNotFoundErrors(t *testing.T) {
 	if !res.IsError {
 		t.Fatalf("expected a tool-level error for an unresolvable item, got success: %s", textOf(t, res))
 	}
+	// The crafted "no item matching" message must reach the caller verbatim
+	// — it's a toolError, not a raw internal error, so sanitizeToolError
+	// (added alongside this test) must pass it through unchanged rather than
+	// collapsing it to the generic "internal error" text.
+	if text := textOf(t, res); text != `no item matching "definitely-does-not-exist-anywhere-12345" found` {
+		t.Fatalf("expected the crafted not-found message, got: %q", text)
+	}
 
 	res, err = cs.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "add_item",
@@ -735,6 +742,36 @@ func TestMCPToolsNotFoundErrors(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Fatalf("expected a tool-level error for add_item with an unresolvable location, got success: %s", textOf(t, res))
+	}
+}
+
+// TestMCPToolsSanitizeInternalErrors proves a raw internal error (a pgx/
+// Postgres driver error, in this case) never reaches an MCP caller as-is —
+// only sanitizeToolError's generic "internal error" text should, with the
+// real error logged server-side instead. Closing the pool before the call is
+// the simplest way to force a genuine internal error deterministically,
+// without depending on a specific constraint name or SQLSTATE staying
+// stable. Contrast with TestMCPToolsNotFoundErrors above, which proves the
+// opposite case: a deliberately-crafted toolError must NOT be collapsed to
+// this same generic text.
+func TestMCPToolsSanitizeInternalErrors(t *testing.T) {
+	pool := testPool(t)
+	cs := testClient(t, pool)
+
+	pool.Close()
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "find_items",
+		Arguments: map[string]any{"query": "anything"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected a tool-level error once the pool is closed, got success: %s", textOf(t, res))
+	}
+	if text := textOf(t, res); text != "internal error" {
+		t.Fatalf("expected the sanitized generic message, got a leaked raw error instead: %q", text)
 	}
 }
 

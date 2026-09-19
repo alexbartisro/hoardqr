@@ -28,7 +28,7 @@ const scoreEpsilon = 1e-6
 // identically-named items is not recoverable by the caller noticing —
 // nothing in the response would indicate a choice was made.
 func ambiguousError(kind, query string, matches []string) error {
-	return fmt.Errorf("%q matches more than one %s, be more specific: %s", query, kind, strings.Join(matches, "; "))
+	return toolErrorf("%q matches more than one %s, be more specific: %s", query, kind, strings.Join(matches, "; "))
 }
 
 // resolveLocation finds the best-matching location for a free-text name or
@@ -47,14 +47,14 @@ func ambiguousError(kind, query string, matches []string) error {
 func resolveLocation(ctx context.Context, q *store.Queries, name string) (id int64, matchedName string, err error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
-		return 0, "", fmt.Errorf("location name is required")
+		return 0, "", toolErrorf("location name is required")
 	}
 	candidates, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: trimmed, Kind: "location"})
 	if err != nil {
 		return 0, "", err
 	}
 	if len(candidates) == 0 {
-		return 0, "", fmt.Errorf("no location matching %q found", trimmed)
+		return 0, "", toolErrorf("no location matching %q found", trimmed)
 	}
 
 	// candidates preserves SearchSuggestByKind's own `ORDER BY score DESC,
@@ -91,7 +91,7 @@ func resolveLocation(ctx context.Context, q *store.Queries, name string) (id int
 func resolveItem(ctx context.Context, q *store.Queries, name string) (id int64, matchedName string, locationID int64, err error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
-		return 0, "", 0, fmt.Errorf("item name is required")
+		return 0, "", 0, toolErrorf("item name is required")
 	}
 	rows, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: trimmed, Kind: "item"})
 	if err != nil {
@@ -104,12 +104,12 @@ func resolveItem(ctx context.Context, q *store.Queries, name string) (id int64, 
 			// Can't happen given SearchSuggestByKind's LEFT JOIN always
 			// supplies location_id for kind="item" rows, but fail loudly
 			// rather than silently if that invariant ever breaks.
-			return 0, "", 0, fmt.Errorf("item %q has no location_id (data inconsistency)", row.Name)
+			return 0, "", 0, toolErrorf("item %q has no location_id (data inconsistency)", row.Name)
 		}
 		candidates = append(candidates, row)
 	}
 	if len(candidates) == 0 {
-		return 0, "", 0, fmt.Errorf("no item matching %q found", trimmed)
+		return 0, "", 0, toolErrorf("no item matching %q found", trimmed)
 	}
 
 	best := candidates[0].Score

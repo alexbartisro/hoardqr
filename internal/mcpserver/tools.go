@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -90,7 +89,7 @@ func findItemsHandler(q *store.Queries) mcp.ToolHandlerFor[findItemsInput, findI
 
 		itemRows, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: query, Kind: "item"})
 		if err != nil {
-			return nil, findItemsOutput{}, err
+			return nil, findItemsOutput{}, sanitizeToolError(ctx, "find_items", err)
 		}
 		for _, row := range itemRows {
 			if row.LocationID == nil {
@@ -98,7 +97,7 @@ func findItemsHandler(q *store.Queries) mcp.ToolHandlerFor[findItemsInput, findI
 			}
 			breadcrumb, err := breadcrumbText(ctx, q, *row.LocationID)
 			if err != nil {
-				return nil, findItemsOutput{}, err
+				return nil, findItemsOutput{}, sanitizeToolError(ctx, "find_items", err)
 			}
 			out.Items = append(out.Items, foundItem{ID: row.ID, Name: row.Name, Location: breadcrumb})
 			seen[row.ID] = true
@@ -111,13 +110,13 @@ func findItemsHandler(q *store.Queries) mcp.ToolHandlerFor[findItemsInput, findI
 		// endpoint (§9's Mock API surface gaps, see CLAUDE.md).
 		tagRows, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: query, Kind: "tag"})
 		if err != nil {
-			return nil, findItemsOutput{}, err
+			return nil, findItemsOutput{}, sanitizeToolError(ctx, "find_items", err)
 		}
 		for _, row := range tagRows {
 			tag := row.Name
 			taggedItems, err := q.ListItems(ctx, store.ListItemsParams{Tag: &tag})
 			if err != nil {
-				return nil, findItemsOutput{}, err
+				return nil, findItemsOutput{}, sanitizeToolError(ctx, "find_items", err)
 			}
 			for _, item := range taggedItems {
 				if seen[item.ID] {
@@ -125,7 +124,7 @@ func findItemsHandler(q *store.Queries) mcp.ToolHandlerFor[findItemsInput, findI
 				}
 				breadcrumb, err := breadcrumbText(ctx, q, item.LocationID)
 				if err != nil {
-					return nil, findItemsOutput{}, err
+					return nil, findItemsOutput{}, sanitizeToolError(ctx, "find_items", err)
 				}
 				out.Items = append(out.Items, foundItem{ID: item.ID, Name: item.Name, Location: breadcrumb})
 				seen[item.ID] = true
@@ -151,11 +150,11 @@ func whereIsHandler(q *store.Queries) mcp.ToolHandlerFor[whereIsInput, whereIsOu
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in whereIsInput) (*mcp.CallToolResult, whereIsOutput, error) {
 		_, matchedName, locationID, err := resolveItem(ctx, q, in.Name)
 		if err != nil {
-			return nil, whereIsOutput{}, err
+			return nil, whereIsOutput{}, sanitizeToolError(ctx, "where_is", err)
 		}
 		breadcrumb, err := breadcrumbText(ctx, q, locationID)
 		if err != nil {
-			return nil, whereIsOutput{}, err
+			return nil, whereIsOutput{}, sanitizeToolError(ctx, "where_is", err)
 		}
 		return nil, whereIsOutput{Item: matchedName, Location: breadcrumb}, nil
 	}
@@ -183,19 +182,19 @@ func listContentsHandler(q *store.Queries) mcp.ToolHandlerFor[listContentsInput,
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in listContentsInput) (*mcp.CallToolResult, listContentsOutput, error) {
 		locationID, matchedName, err := resolveLocation(ctx, q, in.Location)
 		if err != nil {
-			return nil, listContentsOutput{}, err
+			return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
 		}
 		path, err := breadcrumbText(ctx, q, locationID)
 		if err != nil {
-			return nil, listContentsOutput{}, err
+			return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
 		}
 		descendantIDs, err := q.DescendantLocationIDs(ctx, locationID)
 		if err != nil {
-			return nil, listContentsOutput{}, err
+			return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
 		}
 		rows, err := q.ListItemsByLocationIDs(ctx, descendantIDs)
 		if err != nil {
-			return nil, listContentsOutput{}, err
+			return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
 		}
 		out := listContentsOutput{Location: matchedName, Path: path, Items: []contentItem{}}
 		for _, row := range rows {
@@ -227,11 +226,11 @@ func addItemHandler(q *store.Queries) mcp.ToolHandlerFor[addItemInput, addItemOu
 		// so an MCP caller shouldn't be able to create one either.
 		name := strings.TrimSpace(in.Name)
 		if name == "" {
-			return nil, addItemOutput{}, fmt.Errorf("name is required")
+			return nil, addItemOutput{}, toolErrorf("name is required")
 		}
 		locationID, matchedLocation, err := resolveLocation(ctx, q, in.Location)
 		if err != nil {
-			return nil, addItemOutput{}, err
+			return nil, addItemOutput{}, sanitizeToolError(ctx, "add_item", err)
 		}
 		quantity := int32(1)
 		if in.Quantity != nil {
@@ -247,7 +246,7 @@ func addItemHandler(q *store.Queries) mcp.ToolHandlerFor[addItemInput, addItemOu
 			CustomFields: []byte("{}"),
 		})
 		if err != nil {
-			return nil, addItemOutput{}, err
+			return nil, addItemOutput{}, sanitizeToolError(ctx, "add_item", err)
 		}
 		return nil, addItemOutput{ID: item.ID, Name: item.Name, Location: matchedLocation, Code: item.QrToken}, nil
 	}
@@ -274,14 +273,14 @@ func addLocationHandler(q *store.Queries) mcp.ToolHandlerFor[addLocationInput, a
 		// so an MCP caller shouldn't be able to create one either.
 		name := strings.TrimSpace(in.Name)
 		if name == "" {
-			return nil, addLocationOutput{}, fmt.Errorf("name is required")
+			return nil, addLocationOutput{}, toolErrorf("name is required")
 		}
 
 		var parentID *int64
 		if in.Parent != nil {
 			id, _, err := resolveLocation(ctx, q, *in.Parent)
 			if err != nil {
-				return nil, addLocationOutput{}, err
+				return nil, addLocationOutput{}, sanitizeToolError(ctx, "add_location", err)
 			}
 			parentID = &id
 		}
@@ -302,13 +301,13 @@ func addLocationHandler(q *store.Queries) mcp.ToolHandlerFor[addLocationInput, a
 				break
 			}
 			if !isConflict(err) || attempt >= 5 {
-				return nil, addLocationOutput{}, err
+				return nil, addLocationOutput{}, sanitizeToolError(ctx, "add_location", err)
 			}
 		}
 
 		path, err := breadcrumbText(ctx, q, location.ID)
 		if err != nil {
-			return nil, addLocationOutput{}, err
+			return nil, addLocationOutput{}, sanitizeToolError(ctx, "add_location", err)
 		}
 		return nil, addLocationOutput{ID: location.ID, Name: location.Name, Path: path, Code: location.QrToken}, nil
 	}
@@ -345,20 +344,20 @@ func moveItemHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[moveItemInput, moveI
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in moveItemInput) (*mcp.CallToolResult, moveItemOutput, error) {
 		itemID, matchedItem, fromLocationID, err := resolveItem(ctx, q, in.Item)
 		if err != nil {
-			return nil, moveItemOutput{}, err
+			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
 		toLocationID, matchedToLocation, err := resolveLocation(ctx, q, in.NewLocation)
 		if err != nil {
-			return nil, moveItemOutput{}, err
+			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
 		fromBreadcrumb, err := breadcrumbText(ctx, q, fromLocationID)
 		if err != nil {
-			return nil, moveItemOutput{}, err
+			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
 
 		details, err := json.Marshal(auditDetails{FromLocationID: fromLocationID, ToLocationID: toLocationID})
 		if err != nil {
-			return nil, moveItemOutput{}, err
+			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
 
 		// The reassignment and its audit trail commit or fail together —
@@ -379,7 +378,7 @@ func moveItemHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[moveItemInput, moveI
 				return err
 			}
 			if rows == 0 {
-				return fmt.Errorf("item %q was deleted before the move completed", matchedItem)
+				return toolErrorf("item %q was deleted before the move completed", matchedItem)
 			}
 			return txq.InsertAuditLog(ctx, store.InsertAuditLogParams{
 				EntityType: "item",
@@ -390,7 +389,7 @@ func moveItemHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[moveItemInput, moveI
 			})
 		})
 		if err != nil {
-			return nil, moveItemOutput{}, err
+			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
 
 		return nil, moveItemOutput{Item: matchedItem, FromLocation: fromBreadcrumb, ToLocation: matchedToLocation}, nil
