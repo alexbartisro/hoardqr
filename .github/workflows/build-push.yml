@@ -1,4 +1,4 @@
-name: Build and push image
+name: Test, build, and push image
 
 on:
   push:
@@ -10,7 +10,111 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  test-go:
+    runs-on: ubuntu-latest
+    services:
+      # Plain postgres:16, not the project's own postgres:16-alpine + pg_trgm
+      # setup — pg_trgm is a stock contrib extension, and the Go test suite's
+      # own migrations (applied below, same as a real deployment's first
+      # startup) already CREATE EXTENSION IF NOT EXISTS pg_trgm — nothing
+      # extra needed in the service image itself.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hoardqr
+          POSTGRES_PASSWORD: hoardqr
+          POSTGRES_DB: hoardqr
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U hoardqr"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      # sslmode=disable for the same reason docker-compose.yml's DATABASE_URL
+      # needs it — this service container has no SSL configured either. See
+      # docker-compose.yml's own comment or README.md for the full story.
+      DATABASE_URL_TEST: postgres://hoardqr:hoardqr@localhost:5432/hoardqr?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install golang-migrate CLI
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.20.1
+
+      - name: Apply migrations
+        run: migrate -path migrations -database "$DATABASE_URL_TEST" up
+
+      - name: Stub the embedded frontend
+        # web/build is a gitignored build artifact, so a fresh checkout has
+        # none — and web/embed.go's `//go:embed all:build` refuses to compile
+        # without it, which breaks vet/test for every package importing
+        # hoardqr/web (including cmd/hoardqr, which go test builds even
+        # though it has no tests of its own). Nothing in this job serves the
+        # embedded FS, so a placeholder file is enough; check-frontend does
+        # the real frontend build.
+        run: mkdir -p web/build && echo '<!doctype html>' > web/build/index.html
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: gofmt check
+        run: |
+          files=$(gofmt -l . | grep -v '^web/' || true)
+          if [ -n "$files" ]; then
+            echo "The following files are not gofmt'd:"
+            echo "$files"
+            exit 1
+          fi
+
+      - name: go test
+        # -p 1 (not the default, which runs each package's tests as a
+        # separate concurrent binary): every DB-backed test here shares one
+        # real Postgres instance, not an isolated per-package one, so two
+        # packages' tests running at the same time can observe each other's
+        # rows mid-test. Found empirically running this exact recipe against
+        # a genuinely fresh database (this project's own local dev DB had
+        # enough leftover cross-session data that the race never showed up)
+        # — internal/api and internal/mcpserver both do plain
+        # `SELECT count(*) FROM items`-style assertions, and one package's
+        # insert/delete activity landed inside the other's before/after
+        # window. -p 1 serializes package test binaries (tests within a
+        # package were already sequential — nothing here uses t.Parallel).
+        run: go test -p 1 -count=1 ./... -v
+
+  check-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Type-check
+        working-directory: web
+        run: npm run check
+
+      - name: Build
+        working-directory: web
+        run: npm run build
+
   build-and-push:
+    needs: [test-go, check-frontend]
     runs-on: ubuntu-latest
     permissions:
       contents: read
