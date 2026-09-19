@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -561,6 +562,149 @@ func TestMCPToolsRejectBlankNames(t *testing.T) {
 	}
 	if afterItems != beforeItems {
 		t.Fatalf("expected the rejected add_item call to create nothing, item count went from %d to %d", beforeItems, afterItems)
+	}
+}
+
+// TestUpdateItemLocationReportsZeroRowsForDeletedItem proves the primitive
+// move_item's TOCTOU fix depends on: UpdateItemLocation (:execrows, not
+// :exec) correctly reports 0 rows affected against an item id that no
+// longer exists, rather than succeeding silently. This is exactly the
+// situation a concurrent delete between moveItemHandler's resolveItem call
+// (on the pool, before any transaction starts) and its UpdateItemLocation
+// call (inside the transaction) would produce.
+//
+// This test doesn't drive the race through the real moveItemHandler/MCP
+// tool call end-to-end: resolveItem re-resolves the item by name at call
+// time, so a single-threaded test can't observe "found during resolution,
+// gone by the time the transaction runs" without either genuine concurrency
+// (racy, non-deterministic — Postgres row-locks would make timing hard to
+// control precisely) or restructuring the handler purely for testability.
+// Verified the handler's logic by hand instead: moveItemHandler treats
+// rows == 0 as a hard error inside the transaction, so InsertAuditLog never
+// runs and withTx rolls back — the same "traced by hand, confirm under real
+// concurrent use" approach already used elsewhere in this codebase for a
+// similarly timing-dependent path (see CLAUDE.md's /scan duplicate-picker
+// note).
+func TestUpdateItemLocationReportsZeroRowsForDeletedItem(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "toctou test shelf", QrToken: codegen.PlainTextCode(), IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	otherLoc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "toctou test other shelf", QrToken: codegen.PlainTextCode(), IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation other: %v", err)
+	}
+	item, err := q.InsertItem(ctx, store.InsertItemParams{
+		LocationID: loc.ID, Name: "toctou test item", QrToken: codegen.PlainTextCode(),
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = ANY($1)`, []int64{loc.ID, otherLoc.ID})
+	})
+
+	// Simulates "deleted concurrently, between resolution and the move's
+	// transaction" — sequential here since a single-threaded test can't
+	// race it for real, but the effect on UpdateItemLocation is identical:
+	// the row is gone by the time it runs.
+	if _, err := pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID); err != nil {
+		t.Fatalf("deleting item to simulate the race: %v", err)
+	}
+
+	rows, err := q.UpdateItemLocation(ctx, store.UpdateItemLocationParams{ID: item.ID, LocationID: otherLoc.ID})
+	if err != nil {
+		t.Fatalf("UpdateItemLocation: %v", err)
+	}
+	if rows != 0 {
+		t.Fatalf("expected 0 rows affected for a deleted item, got %d", rows)
+	}
+}
+
+// TestMoveItemTransactionAbortsAndSkipsAuditLogForDeletedItem tests the
+// actual invariant that matters from moveItemHandler's rows == 0 branch —
+// no audit_log row for a move that didn't happen — by replicating the
+// transaction closure's body directly against a deleted item's id.
+// moveItemHandler itself can't be driven into this branch through the real
+// MCP tool call (resolveItem re-resolves by name and would fail first, not
+// silently proceed with a stale id — see
+// TestUpdateItemLocationReportsZeroRowsForDeletedItem's comment), so this
+// duplicates the closure body rather than the whole handler, which is the
+// smallest way to exercise the branch deterministically instead of leaving
+// it purely hand-traced.
+func TestMoveItemTransactionAbortsAndSkipsAuditLogForDeletedItem(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "toctou handler test shelf", QrToken: codegen.PlainTextCode(), IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	item, err := q.InsertItem(ctx, store.InsertItemParams{
+		LocationID: loc.ID, Name: "toctou handler test item", QrToken: codegen.PlainTextCode(),
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID)
+	})
+
+	if _, err := pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID); err != nil {
+		t.Fatalf("deleting item to simulate the race: %v", err)
+	}
+
+	var auditCountBefore int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE entity_type = 'item' AND entity_id = $1`, item.ID).Scan(&auditCountBefore); err != nil {
+		t.Fatalf("counting audit_log rows: %v", err)
+	}
+
+	// ⚠️ Same body as moveItemHandler's withTx closure
+	// (internal/mcpserver/tools.go) — edit both together, same duplication
+	// hazard as search.sql's two matches CTEs (see that file's comment):
+	// a change to the transaction body here goes stale silently otherwise.
+	txErr := withTx(ctx, pool, func(tx pgx.Tx) error {
+		txq := store.New(tx)
+		rows, err := txq.UpdateItemLocation(ctx, store.UpdateItemLocationParams{ID: item.ID, LocationID: loc.ID})
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return fmt.Errorf("item %q was deleted before the move completed", "toctou handler test item")
+		}
+		return txq.InsertAuditLog(ctx, store.InsertAuditLogParams{
+			EntityType: "item",
+			EntityID:   item.ID,
+			Action:     "moved",
+			UserID:     nil,
+			Details:    []byte("{}"),
+		})
+	})
+	if txErr == nil {
+		t.Fatal("expected the transaction to return an error for a deleted item, got nil")
+	}
+
+	var auditCountAfter int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE entity_type = 'item' AND entity_id = $1`, item.ID).Scan(&auditCountAfter); err != nil {
+		t.Fatalf("counting audit_log rows: %v", err)
+	}
+	if auditCountAfter != auditCountBefore {
+		t.Fatalf("expected no new audit_log row for a move that never happened, count went from %d to %d", auditCountBefore, auditCountAfter)
 	}
 }
 

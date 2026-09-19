@@ -363,13 +363,23 @@ func moveItemHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[moveItemInput, moveI
 
 		// The reassignment and its audit trail commit or fail together —
 		// otherwise a failure between the two either loses the move or
-		// records a move that never happened.
+		// records a move that never happened. UpdateItemLocation's affected
+		// row count also guards a TOCTOU: resolveItem ran on the pool, before
+		// this transaction started, so a concurrent delete of the item in
+		// between would otherwise make the UPDATE a silent no-op — 0 rows
+		// affected, no error — while InsertAuditLog still committed a
+		// "moved" row and this handler still reported success for a move
+		// that never happened.
 		err = withTx(ctx, pool, func(tx pgx.Tx) error {
 			txq := store.New(tx)
-			if err := txq.UpdateItemLocation(ctx, store.UpdateItemLocationParams{
+			rows, err := txq.UpdateItemLocation(ctx, store.UpdateItemLocationParams{
 				ID: itemID, LocationID: toLocationID,
-			}); err != nil {
+			})
+			if err != nil {
 				return err
+			}
+			if rows == 0 {
+				return fmt.Errorf("item %q was deleted before the move completed", matchedItem)
 			}
 			return txq.InsertAuditLog(ctx, store.InsertAuditLogParams{
 				EntityType: "item",

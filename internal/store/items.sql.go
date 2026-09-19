@@ -504,7 +504,7 @@ func (q *Queries) TagNamesForItem(ctx context.Context, itemID int64) ([]string, 
 	return items, nil
 }
 
-const updateItemLocation = `-- name: UpdateItemLocation :exec
+const updateItemLocation = `-- name: UpdateItemLocation :execrows
 UPDATE items SET location_id = $1::bigint, updated_at = now()
 WHERE id = $2::bigint
 `
@@ -517,7 +517,15 @@ type UpdateItemLocationParams struct {
 // Backs the MCP move_item tool (§11) — a plain reassignment, paired with an
 // InsertAuditLog call in the same handler (audit_log's first real writer;
 // §3 defines the table but nothing has written to it before this tool).
-func (q *Queries) UpdateItemLocation(ctx context.Context, arg UpdateItemLocationParams) error {
-	_, err := q.db.Exec(ctx, updateItemLocation, arg.LocationID, arg.ID)
-	return err
+// :execrows (not :exec) so move_item can tell a real reassignment apart
+// from a no-op against an item deleted between resolveItem's lookup (on
+// the pool, outside this transaction) and this UPDATE — without it, 0 rows
+// affected still committed an audit_log "moved" row and reported success
+// for a move that never happened.
+func (q *Queries) UpdateItemLocation(ctx context.Context, arg UpdateItemLocationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateItemLocation, arg.LocationID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
