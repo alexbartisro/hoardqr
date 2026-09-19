@@ -376,12 +376,12 @@ LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
 GROUP BY i.id
 ORDER BY i.created_at DESC
-LIMIT $1 OFFSET $2
+LIMIT $2::bigint OFFSET $1::bigint
 `
 
 type ListRecentItemsParams struct {
-	Limit  int32
-	Offset int32
+	PageOffset int64
+	PageLimit  int64
 }
 
 type ListRecentItemsRow struct {
@@ -405,9 +405,14 @@ type ListRecentItemsRow struct {
 }
 
 // Backs getRecentItems (not in §9 — see CLAUDE.md's "Mock API surface"
-// notes): the dashboard's newest-first feed.
+// notes): the dashboard's newest-first feed. limit/offset are explicitly
+// ::bigint (not left to default inference) so the generated Go params are
+// int64 — ItemsHandler.listRecent computes offset as int64 specifically to
+// avoid an int32 overflow wrapping a large page/pageSize into a negative
+// offset, which Postgres would then reject with a generic error instead of
+// a clean 400.
 func (q *Queries) ListRecentItems(ctx context.Context, arg ListRecentItemsParams) ([]ListRecentItemsRow, error) {
-	rows, err := q.db.Query(ctx, listRecentItems, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listRecentItems, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}

@@ -78,24 +78,42 @@ func (h *ItemsHandler) list(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+// maxRecentItemsPageSize bounds how many rows (and how many N+1
+// LocationBreadcrumb queries below) a single request can trigger — without
+// it, a client-supplied pageSize had no ceiling at all.
+const maxRecentItemsPageSize = 100
+
 func (h *ItemsHandler) listRecent(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	page := int32(1)
+	page := int64(1)
 	if raw := q.Get("page"); raw != "" {
-		if v, err := strconv.ParseInt(raw, 10, 32); err == nil && v > 0 {
-			page = int32(v)
+		if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
+			page = v
 		}
 	}
-	pageSize := int32(10)
+	pageSize := int64(10)
 	if raw := q.Get("pageSize"); raw != "" {
-		if v, err := strconv.ParseInt(raw, 10, 32); err == nil && v > 0 {
-			pageSize = int32(v)
+		if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
+			pageSize = v
 		}
+	}
+	if pageSize > maxRecentItemsPageSize {
+		pageSize = maxRecentItemsPageSize
+	}
+
+	// int64 (not int32) so (page-1)*pageSize doesn't overflow into a
+	// negative offset for a large page — Postgres would otherwise reject a
+	// negative OFFSET with a generic error instead of this being handled
+	// cleanly. Clamped to 0 as a last resort in case even int64 overflows
+	// (astronomically large page values, still parseable as int64).
+	offset := (page - 1) * pageSize
+	if offset < 0 {
+		offset = 0
 	}
 
 	rows, err := h.q.ListRecentItems(r.Context(), store.ListRecentItemsParams{
-		Limit:  pageSize,
-		Offset: (page - 1) * pageSize,
+		PageLimit:  pageSize,
+		PageOffset: offset,
 	})
 	if err != nil {
 		serverError(w, r, err)

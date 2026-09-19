@@ -42,14 +42,19 @@ ORDER BY i.name;
 
 -- name: ListRecentItems :many
 -- Backs getRecentItems (not in §9 — see CLAUDE.md's "Mock API surface"
--- notes): the dashboard's newest-first feed.
+-- notes): the dashboard's newest-first feed. limit/offset are explicitly
+-- ::bigint (not left to default inference) so the generated Go params are
+-- int64 — ItemsHandler.listRecent computes offset as int64 specifically to
+-- avoid an int32 overflow wrapping a large page/pageSize into a negative
+-- offset, which Postgres would then reject with a generic error instead of
+-- a clean 400.
 SELECT i.*, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
 GROUP BY i.id
 ORDER BY i.created_at DESC
-LIMIT $1 OFFSET $2;
+LIMIT sqlc.arg(page_limit)::bigint OFFSET sqlc.arg(page_offset)::bigint;
 
 -- name: CountItems :one
 SELECT count(*) FROM items;

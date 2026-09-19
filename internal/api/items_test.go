@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"hoardqr/internal/codegen"
 	"hoardqr/internal/store"
 )
 
@@ -188,5 +189,99 @@ func TestItemCreateTreatsEmptyQrTokenAsAbsent(t *testing.T) {
 	}
 	if created.QrToken == "" {
 		t.Fatal("expected an auto-generated non-empty qr_token, got an empty one")
+	}
+}
+
+// TestRecentItemsHandlesLargePageWithoutOverflow proves a large page number
+// no longer overflows into a negative OFFSET (a bare int32 product wraps
+// around well before values an HTTP client can trivially send) — Postgres
+// rejects a negative OFFSET outright, which used to surface as a generic
+// 500 instead of a clean, empty result page.
+func TestRecentItemsHandlesLargePageWithoutOverflow(t *testing.T) {
+	pool := testPool(t)
+	router := NewRouter(pool, t.TempDir())
+
+	// page * pageSize here (300000 * 10000 = 3,000,000,000) exceeds
+	// int32's ~2.1 billion max — the exact shape of value that used to wrap
+	// the offset negative.
+	req := httptest.NewRequest(http.MethodGet, "/api/items?sort=created_desc&page=300000&pageSize=10000", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for a large page number, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// A page value past int64's own range can't even be parsed —
+	// strconv.ParseInt fails and listRecent silently keeps the page=1
+	// default, which is what actually stops the (page-1)*pageSize product
+	// from ever reaching a value large enough to matter, more than the
+	// offset<0 clamp does. Pinning this so a future "validate inputs
+	// properly" refactor doesn't turn this silent fallback into a 400 (or
+	// worse, an unguarded parse) without someone noticing the behavior
+	// changed.
+	req = httptest.NewRequest(http.MethodGet, "/api/items?sort=created_desc&page=99999999999999999999&pageSize=10", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for a page value past int64's range, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestRecentItemsCapsPageSize proves an unbounded pageSize is clamped —
+// without a cap, a single request could pull an arbitrary number of rows
+// and issue one LocationBreadcrumb query per row (N+1). Needs more than
+// maxRecentItemsPageSize real rows to be a meaningful assertion (the dev
+// database this runs against may otherwise have too few items for the cap
+// to ever actually bind), so this creates its own fixture data directly via
+// the store rather than the slower create-one-per-HTTP-request route.
+func TestRecentItemsCapsPageSize(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "recent items cap test root", QrToken: "RECENTCAP-LOC", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM items WHERE location_id = $1`, loc.ID); err != nil {
+			t.Logf("cleanup: deleting test items: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID); err != nil {
+			t.Logf("cleanup: deleting test location: %v", err)
+		}
+	})
+
+	const fixtureCount = maxRecentItemsPageSize + 5
+	for i := 0; i < fixtureCount; i++ {
+		if _, err := q.InsertItem(ctx, store.InsertItemParams{
+			LocationID: loc.ID, Name: fmt.Sprintf("recent cap item %d", i), QrToken: codegen.PlainTextCode(),
+			IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+		}); err != nil {
+			t.Fatalf("InsertItem %d: %v", i, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/items?sort=created_desc&pageSize=1000000", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Entries []json.RawMessage `json:"entries"`
+		Total   int64             `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if len(body.Entries) != maxRecentItemsPageSize {
+		t.Fatalf("expected exactly %d entries (the cap) with %d real rows and pageSize=1000000, got %d", maxRecentItemsPageSize, fixtureCount, len(body.Entries))
+	}
+	if body.Total < fixtureCount {
+		t.Fatalf("expected total to reflect the true row count (>= %d), got %d — the cap should only bound the page, not the total", fixtureCount, body.Total)
 	}
 }
