@@ -23,6 +23,7 @@
 	let renameValue = $state('');
 	let renameError = $state<string | null>(null);
 	let savingRename = $state(false);
+	let renameInput = $state<HTMLInputElement | null>(null);
 
 	let deleting = $state(false);
 	let deleteError = $state<string | null>(null);
@@ -49,6 +50,15 @@
 				if (seq !== loadSeq) return;
 				loadError = e instanceof Error ? e.message : 'Failed to load location.';
 			});
+	});
+
+	// Autofocus + select on entering rename mode, so typing a new name
+	// doesn't require an extra click first.
+	$effect(() => {
+		if (renaming) {
+			renameInput?.focus();
+			renameInput?.select();
+		}
 	});
 
 	function startRename() {
@@ -153,40 +163,60 @@
 	{:else if !location}
 		<p class="text-muted-foreground text-sm">Loading…</p>
 	{:else}
-		<div class="flex flex-wrap items-center justify-between gap-2">
+		<!-- Ancestors only — the current location gets a real heading below,
+		     not a trailing breadcrumb crumb doing double duty as the title. -->
+		{#if breadcrumb.length > 1}
+			{@const ancestors = breadcrumb.slice(0, -1)}
 			<div class="flex flex-wrap items-center gap-1 text-sm">
-				{#each breadcrumb.slice(0, -1) as b (b.id)}
+				{#each ancestors as b, i (b.id)}
 					<a href="/locations/{b.id}" class="hover:underline">{b.name}</a>
-					<span class="text-muted-foreground">›</span>
+					{#if i < ancestors.length - 1}<span class="text-muted-foreground">›</span>{/if}
 				{/each}
-				{#if !renaming}
-					<span class="font-medium">{location.name}</span>
-				{/if}
 			</div>
-			<Button variant="outline" size="sm" href="/locations/{location.id}/label">Print label</Button>
-		</div>
-
-		{#if renaming}
-			<div class="flex flex-col gap-1">
-				<div class="flex gap-2">
-					<Input bind:value={renameValue} disabled={savingRename} />
-					<Button size="sm" onclick={saveRename} disabled={savingRename}>
-						{savingRename ? 'Saving…' : 'Save'}
-					</Button>
-					<Button variant="outline" size="sm" onclick={() => (renaming = false)} disabled={savingRename}>
-						Cancel
-					</Button>
-				</div>
-				{#if renameError}<p class="text-destructive text-xs">{renameError}</p>{/if}
-			</div>
-		{:else}
-			<Button variant="ghost" size="sm" class="self-start" onclick={startRename}>Rename</Button>
 		{/if}
 
-		<div>
-			<PhotoUpload bind:photoUrl={location.photo_url} onchange={handlePhotoChange} />
-			{#if photoSaveError}<p class="text-destructive mt-1 text-xs">{photoSaveError}</p>{/if}
-		</div>
+		<Card.Root variant="glass" class="p-4">
+			<Card.Header class="p-0">
+				<div class="flex items-start gap-4">
+					<PhotoUpload bind:photoUrl={location.photo_url} onchange={handlePhotoChange} />
+					<div class="flex min-w-0 flex-1 flex-col gap-1 pt-1">
+						{#if renaming}
+							<form
+								class="flex flex-col gap-1"
+								onsubmit={(e) => {
+									e.preventDefault();
+									saveRename();
+								}}
+							>
+								<Input
+									bind:ref={renameInput}
+									bind:value={renameValue}
+									disabled={savingRename}
+									onkeydown={(e) => e.key === 'Escape' && (renaming = false)}
+								/>
+								{#if renameError}<p class="text-destructive text-xs">{renameError}</p>{/if}
+							</form>
+						{:else}
+							<h1 class="text-xl font-semibold break-words">{location.name}</h1>
+						{/if}
+						{#if photoSaveError}<p class="text-destructive text-xs">{photoSaveError}</p>{/if}
+					</div>
+				</div>
+				<Card.Action class="flex flex-wrap gap-2">
+					{#if renaming}
+						<Button size="sm" onclick={saveRename} disabled={savingRename}>
+							{savingRename ? 'Saving…' : 'Save'}
+						</Button>
+						<Button variant="outline" size="sm" onclick={() => (renaming = false)} disabled={savingRename}>
+							Cancel
+						</Button>
+					{:else}
+						<Button variant="outline" size="sm" href="/locations/{location.id}/label">Print label</Button>
+						<Button variant="ghost" size="sm" onclick={startRename}>Rename</Button>
+					{/if}
+				</Card.Action>
+			</Card.Header>
+		</Card.Root>
 
 		{#if children.length > 0}
 			<div class="flex flex-col gap-2">
@@ -218,7 +248,7 @@
 			<p class="text-muted-foreground text-sm">Nothing here yet.</p>
 		{/if}
 
-		<div class="flex flex-col items-start gap-1">
+		<div class="border-border/50 mt-2 flex flex-col items-start gap-1 border-t pt-4">
 			<Button variant="destructive" onclick={handleDelete} disabled={deleting}>
 				{deleting ? 'Deleting…' : 'Delete'}
 			</Button>
