@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -216,4 +217,53 @@ func TestRecursiveLocationQueriesTerminateOnCycle(t *testing.T) {
 	if len(descendants) > 2 {
 		t.Fatalf("expected DescendantLocationIDs to stop after visiting the 2 locations in the cycle, got %d rows", len(descendants))
 	}
+}
+
+// TestLocationCreateTreatsEmptyQrTokenAsAbsent proves an explicit
+// qr_token: "" is treated the same as an absent qr_token (auto-generate a
+// real code), not as "the caller's chosen token happens to be the empty
+// string". Before this fix, "" occupied locations.qr_token's unique slot,
+// so a second location also sent with qr_token: "" would 409 against the
+// first one's "" rather than each getting its own distinct generated code.
+func TestLocationCreateTreatsEmptyQrTokenAsAbsent(t *testing.T) {
+	pool := testPool(t)
+	router := NewRouter(pool, t.TempDir())
+
+	create := func() (*httptest.ResponseRecorder, LocationDTO) {
+		body := `{"name": "empty qr_token test", "qr_token": ""}`
+		req := httptest.NewRequest(http.MethodPost, "/api/locations", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		var loc LocationDTO
+		if rec.Code == http.StatusCreated {
+			if err := json.Unmarshal(rec.Body.Bytes(), &loc); err != nil {
+				t.Fatalf("decoding created location: %v", err)
+			}
+		}
+		return rec, loc
+	}
+
+	rec1, loc1 := create()
+	if rec1.Code != http.StatusCreated {
+		t.Fatalf("first create: expected 201, got %d: %s", rec1.Code, rec1.Body.String())
+	}
+	if loc1.QrToken == "" {
+		t.Fatal("expected an auto-generated non-empty qr_token, got an empty one")
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, loc1.ID) })
+
+	// A second location, also sent with qr_token: "", must succeed with its
+	// own distinct generated code — not 409 against the first one's "" as
+	// if both had explicitly chosen the same empty string.
+	rec2, loc2 := create()
+	if rec2.Code != http.StatusCreated {
+		t.Fatalf("second create: expected 201, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+	if loc2.QrToken == "" {
+		t.Fatal("expected an auto-generated non-empty qr_token, got an empty one")
+	}
+	if loc2.QrToken == loc1.QrToken {
+		t.Fatalf("expected two distinct generated codes, got the same one twice: %q", loc1.QrToken)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, loc2.ID) })
 }
