@@ -391,9 +391,31 @@ func (h *LocationsHandler) update(w http.ResponseWriter, r *http.Request) {
 // the force branch is destructive — if DeleteLocation failed after
 // DeleteItemsAtLocation had already committed, those items would be gone
 // for good with the location they were deleted from still sitting there.
-// The read that decides which branch to take also happens inside the
-// transaction, so a concurrent reparent/delete of the same location can't
-// race between the check and the write.
+//
+// The item-clearing step (CountDirectItemsAtLocation+maybe DeleteItemsAtLocation
+// for a root location, PromoteItemsToParent for a non-root one) happens
+// inside this transaction, but under Postgres's default READ COMMITTED
+// isolation that only guarantees each statement its own up-to-date
+// snapshot, not a snapshot frozen for the whole transaction — it does NOT
+// close the race a stronger isolation level would, and the hazard is the
+// same in both branches: a direct item concurrently inserted into this
+// location right after its item-clearing statement runs (and commits
+// elsewhere) but before this transaction's later DeleteLocation statement
+// is still there when DeleteLocation runs, and items.location_id is ON
+// DELETE RESTRICT (migrations/000001_init.up.sql), so DeleteLocation fails
+// outright. Verified empirically with two concurrent psql sessions on both
+// branches: a location correctly counted/promoted as having no direct
+// items still ends up failing DeleteLocation with a raw 23503
+// (foreign-key-violation) once a concurrent insert lands in the gap. No
+// data corruption either way: the FK's RESTRICT is what stops it, rolling
+// the whole transaction back rather than leaving the concurrently-inserted
+// item pointing at a location that got deleted anyway. Worst case is a
+// request that should have cleanly 409'd (root) or actually succeeded
+// against the pre-race state (non-root) failing loudly with an uncaught
+// 500 instead of a retry-worthy error — so this is flagged rather than
+// fixed with a stronger isolation level or an explicit row lock; SERIALIZABLE (or
+// SELECT ... FOR UPDATE on the location row) would close it if this ever
+// becomes a real problem in practice.
 func (h *LocationsHandler) delete(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
