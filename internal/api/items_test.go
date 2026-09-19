@@ -98,3 +98,51 @@ func TestItemsRejectNonObjectCustomFields(t *testing.T) {
 		t.Fatalf("update with a real object: expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestItemUpdateRejectsBlankName proves PATCH /api/items/:id can't blank out
+// an existing item's name — the strings.TrimSpace(...) == "" check only
+// ever lived in the create handler.
+func TestItemUpdateRejectsBlankName(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM items WHERE qr_token = 'BLANKNAME-ITEM'`); err != nil {
+			t.Logf("cleanup: deleting test item: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM locations WHERE qr_token = 'BLANKNAME-LOC'`); err != nil {
+			t.Logf("cleanup: deleting test location: %v", err)
+		}
+	})
+
+	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "blank name test root", QrToken: "BLANKNAME-LOC", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	item, err := q.InsertItem(ctx, store.InsertItemParams{
+		LocationID: loc.ID, Name: "original name", QrToken: "BLANKNAME-ITEM",
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/api/items/%d", item.ID), strings.NewReader(`{"name": "   "}`))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a blank name, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	got, err := q.GetItemByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("GetItemByID: %v", err)
+	}
+	if got.Name != "original name" {
+		t.Fatalf("expected the name to be untouched, got %q", got.Name)
+	}
+}

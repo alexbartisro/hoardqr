@@ -276,5 +276,42 @@ func TestLocationCreateTreatsEmptyQrTokenAsAbsent(t *testing.T) {
 	if loc2.QrToken == loc1.QrToken {
 		t.Fatalf("expected two distinct generated codes, got the same one twice: %q", loc1.QrToken)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, loc2.ID) })
+}
+
+// TestLocationUpdateRejectsBlankName proves PATCH /api/locations/:id can't
+// blank out an existing location's name — the strings.TrimSpace(...) == ""
+// check only ever lived in the create handler.
+func TestLocationUpdateRejectsBlankName(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM locations WHERE qr_token = 'BLANKNAME-PATCH-LOC'`); err != nil {
+			t.Logf("cleanup: deleting test location: %v", err)
+		}
+	})
+
+	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "original name", QrToken: "BLANKNAME-PATCH-LOC", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/api/locations/%d", loc.ID), strings.NewReader(`{"name": "   "}`))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for a blank name, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	got, err := q.GetLocationByID(ctx, loc.ID)
+	if err != nil {
+		t.Fatalf("GetLocationByID: %v", err)
+	}
+	if got.Name != "original name" {
+		t.Fatalf("expected the name to be untouched, got %q", got.Name)
+	}
 }

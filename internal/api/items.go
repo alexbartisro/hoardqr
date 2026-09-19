@@ -337,6 +337,13 @@ func (h *ItemsHandler) update(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "name must be a string")
 				return
 			}
+			// Mirrors create's strings.TrimSpace(req.Name) == "" check — that
+			// check only ever lived on create, so PATCH could blank out an
+			// existing item's name entirely.
+			if strings.TrimSpace(v) == "" {
+				writeError(w, http.StatusBadRequest, "name is required")
+				return
+			}
 			set["name"] = v
 		case "location_id":
 			var v int64
