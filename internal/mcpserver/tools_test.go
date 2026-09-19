@@ -17,17 +17,17 @@ import (
 )
 
 // testPool mirrors internal/api's testPool — connects to DATABASE_URL_TEST
-// (falling back to DATABASE_URL) and skips if neither is set. Duplicated
+// and skips if it's unset, deliberately NOT falling back to DATABASE_URL (a
+// developer's shell can have that set for an unrelated reason, e.g. running
+// the bare binary locally, and a fallback here would silently point this
+// package's tests — which insert and delete real rows — at it). Duplicated
 // rather than shared: it's a few lines, and the two packages have no other
 // reason to depend on each other.
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("DATABASE_URL_TEST")
 	if url == "" {
-		url = os.Getenv("DATABASE_URL")
-	}
-	if url == "" {
-		t.Skip("DATABASE_URL(_TEST) not set — skipping test that needs a real Postgres")
+		t.Skip("DATABASE_URL_TEST not set — skipping test that needs a real Postgres")
 	}
 	pool, err := db.Connect(context.Background(), url)
 	if err != nil {

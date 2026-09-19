@@ -12,17 +12,19 @@ import (
 	"hoardqr/internal/db"
 )
 
-// testPool connects to DATABASE_URL_TEST (falling back to DATABASE_URL) and
-// skips the test if neither is set — there's no CI database wired up yet,
-// so this only runs when a developer has one available locally.
+// testPool connects to DATABASE_URL_TEST and skips the test if it's unset —
+// deliberately does NOT fall back to DATABASE_URL. A developer's shell can
+// easily have DATABASE_URL exported for an unrelated reason (running the
+// bare binary locally, a manual smoke-test against a real deployment) with
+// no DATABASE_URL_TEST set at all; falling back would make `go test ./...`
+// silently insert into and delete from whatever database that points at.
+// CI (`.github/workflows/build-push.yml`) always sets DATABASE_URL_TEST
+// explicitly, so this fallback was never actually needed there either.
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("DATABASE_URL_TEST")
 	if url == "" {
-		url = os.Getenv("DATABASE_URL")
-	}
-	if url == "" {
-		t.Skip("DATABASE_URL(_TEST) not set — skipping test that needs a real Postgres")
+		t.Skip("DATABASE_URL_TEST not set — skipping test that needs a real Postgres")
 	}
 	pool, err := db.Connect(context.Background(), url)
 	if err != nil {
