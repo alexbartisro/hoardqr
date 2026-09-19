@@ -57,6 +57,20 @@
 	// button can receive focus. Checking `relatedTarget` against the container
 	// lets focus move between the input and its own results without closing,
 	// while still closing when focus leaves to anywhere else (click or Tab).
+	//
+	// This alone isn't enough for touch, though (regression found 2026-09-19:
+	// tapping a location result did nothing) — mobile Safari doesn't move
+	// focus to a `<button>` on tap (a long-standing WebKit quirk), so a tap
+	// blurs the input with `relatedTarget: null`, `handleFocusOut` reads that
+	// as "focus left the container" and closes the dropdown, and the
+	// now-removed button's `click` never fires. `onmousedown` +
+	// `preventDefault()` on each result button (below) stops the input from
+	// blurring at all on press — the standard fix every accessible combobox
+	// uses, and it doesn't touch the keyboard path above (Tab still moves
+	// focus normally; only a pointer press on a result is intercepted).
+	// CLAUDE.md previously said this workaround wasn't needed here — that
+	// was true for the mouse-click testing it was verified with, not for a
+	// real touch device.
 	let container: HTMLDivElement | undefined;
 	function handleFocusOut(e: FocusEvent) {
 		if (!container?.contains(e.relatedTarget as Node | null)) open = false;
@@ -83,6 +97,7 @@
 								<button
 									type="button"
 									class="hover:bg-accent w-full rounded-md px-2 py-1.5 text-left text-sm"
+									onmousedown={(e) => e.preventDefault()}
 									onclick={() => select(s)}
 								>
 									{s.name}
