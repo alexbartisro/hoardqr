@@ -29,7 +29,14 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./uploads:/data/uploads
+      # HOST_UPLOADS_DIR is where photo uploads live on the host, not inside
+      # the container — defaults to ./uploads next to this compose file if
+      # unset, so existing deployments need no change. Set it if you keep all
+      # your containers' data under one shared path (e.g. /srv/docker-data/...),
+      # the way most other self-hosted compose files let you. Not to be
+      # confused with UPLOAD_DIR (internal/config), which is the *container's
+      # own* path and stays /data/uploads here regardless.
+      - ${HOST_UPLOADS_DIR:-./uploads}:/data/uploads
     depends_on:
       hoardqr-db:
         condition: service_healthy
@@ -59,7 +66,9 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: hoardqr
     volumes:
-      - ./pgdata:/var/lib/postgresql/data
+      # HOST_PGDATA_DIR — same idea as HOST_UPLOADS_DIR above: where Postgres's
+      # own data directory lives on the host, defaulting to ./pgdata if unset.
+      - ${HOST_PGDATA_DIR:-./pgdata}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hoardqr"]
       interval: 5s
