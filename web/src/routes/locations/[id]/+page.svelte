@@ -35,8 +35,11 @@
 		const seq = ++loadSeq;
 		location = null;
 		loadError = null;
+		photoSaveError = null;
 		renaming = false;
 		renameError = null;
+		savingRename = false;
+		deleting = false;
 		deleteError = null;
 		Promise.all([getLocation(id), getLocations(id), getItems({ location_id: id })])
 			.then(([loc, childLocations, locItems]) => {

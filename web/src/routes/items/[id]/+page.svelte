@@ -39,8 +39,11 @@
 		const seq = ++loadSeq;
 		item = null;
 		loadError = null;
+		photoSaveError = null;
 		renaming = false;
 		renameError = null;
+		savingRename = false;
+		deleting = false;
 		getItemById(id)
 			.then((r) => {
 				if (seq !== loadSeq) return;
