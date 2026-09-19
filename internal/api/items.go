@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -244,7 +245,20 @@ func (h *ItemsHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	customFields := []byte("{}")
+	// An explicit `"custom_fields": null` never reaches validateCustomFieldsObject
+	// here: CustomFields is *json.RawMessage, and encoding/json sets an
+	// explicit JSON null on a pointer field to a nil Go pointer — the same
+	// nil this check sees for an omitted field. It falls through to the
+	// default below instead of being rejected. Harmless (treating explicit
+	// null as "not provided" is reasonable), but worth knowing: PATCH
+	// /api/items/:id *does* reject an explicit null for the same field,
+	// since its generic map[string]json.RawMessage decode can actually see
+	// it as present. See TestItemsRejectNonObjectCustomFields.
 	if req.CustomFields != nil {
+		if err := validateCustomFieldsObject(*req.CustomFields); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		customFields = *req.CustomFields
 	}
 
@@ -402,6 +416,10 @@ func (h *ItemsHandler) update(w http.ResponseWriter, r *http.Request) {
 			}
 			set["receipt_url"] = v
 		case "custom_fields":
+			if err := validateCustomFieldsObject(raw); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
 			set["custom_fields"] = []byte(raw)
 		case "is_shared":
 			var v bool
@@ -519,4 +537,21 @@ func floatToNumeric(f *float64) pgtype.Numeric {
 	var n pgtype.Numeric
 	_ = n.Scan(strconv.FormatFloat(*f, 'f', -1, 64))
 	return n
+}
+
+// validateCustomFieldsObject rejects anything that isn't a JSON object —
+// json.RawMessage only guarantees syntactically valid JSON, not that it's
+// the shape items.custom_fields (JSONB NOT NULL DEFAULT '{}') and the
+// frontend's Record<string, unknown> both assume. Without this, a scalar
+// like `5`, an array, or `null` (which would otherwise violate the column's
+// NOT NULL constraint as a raw Postgres error) is accepted and stored as-is.
+func validateCustomFieldsObject(raw json.RawMessage) error {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return fmt.Errorf("custom_fields must be valid JSON")
+	}
+	if _, ok := v.(map[string]any); !ok {
+		return fmt.Errorf("custom_fields must be a JSON object")
+	}
+	return nil
 }

@@ -229,6 +229,18 @@ func TestLocationCreateTreatsEmptyQrTokenAsAbsent(t *testing.T) {
 	pool := testPool(t)
 	router := NewRouter(pool, t.TempDir())
 
+	// Swept by name unconditionally, not by ID collected after each
+	// successful create — a t.Fatalf on an unexpected assertion (exactly
+	// the failure mode this test guards against) would otherwise skip the
+	// cleanup registration for that row entirely. Bit this once already
+	// (a stray row cleaned up by hand during a revert-check) — see the
+	// same reasoning in TestItemsRejectNonObjectCustomFields.
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM locations WHERE name = 'empty qr_token test'`); err != nil {
+			t.Logf("cleanup: deleting test locations: %v", err)
+		}
+	})
+
 	create := func() (*httptest.ResponseRecorder, LocationDTO) {
 		body := `{"name": "empty qr_token test", "qr_token": ""}`
 		req := httptest.NewRequest(http.MethodPost, "/api/locations", strings.NewReader(body))
@@ -250,7 +262,6 @@ func TestLocationCreateTreatsEmptyQrTokenAsAbsent(t *testing.T) {
 	if loc1.QrToken == "" {
 		t.Fatal("expected an auto-generated non-empty qr_token, got an empty one")
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, loc1.ID) })
 
 	// A second location, also sent with qr_token: "", must succeed with its
 	// own distinct generated code — not 409 against the first one's "" as
