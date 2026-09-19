@@ -153,4 +153,17 @@
 		border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
 		box-shadow: 0 8px 32px oklch(0 0 0 / 10%);
 	}
+	/* .glass-panel's default shadow points down — correct for a floating card
+	   or a top-anchored header casting a shadow onto the content below it, but
+	   backwards for a bottom-anchored bar, which should cast its shadow onto
+	   the content above it. A second class rather than editing .glass-panel
+	   itself: every other glass-panel user (cards, dropdowns, the header) is a
+	   top-shadow case, and this only exists for the one bottom-anchored
+	   exception (the tab bar in +layout.svelte). Combine as
+	   `class="glass-panel glass-panel-shadow-up ..."` — same specificity,
+	   later source order wins, so box-shadow is overridden without touching
+	   background/blur/border. */
+	.glass-panel-shadow-up {
+		box-shadow: 0 -8px 32px oklch(0 0 0 / 10%);
+	}
 }
