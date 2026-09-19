@@ -146,3 +146,47 @@ func TestItemUpdateRejectsBlankName(t *testing.T) {
 		t.Fatalf("expected the name to be untouched, got %q", got.Name)
 	}
 }
+
+// TestItemCreateTreatsEmptyQrTokenAsAbsent mirrors
+// TestLocationCreateTreatsEmptyQrTokenAsAbsent — an explicit qr_token: ""
+// must auto-generate a real code, not store the empty string. Lower stakes
+// than the locations version (items.qr_token isn't unique, so there's no
+// 409-masking failure mode), but an item stored with qr_token = "" would
+// still be unreachable by exact-code scan/search.
+func TestItemCreateTreatsEmptyQrTokenAsAbsent(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM items WHERE name = 'empty qr_token item test'`); err != nil {
+			t.Logf("cleanup: deleting test items: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM locations WHERE qr_token = 'EMPTYQR-ITEM-LOC'`); err != nil {
+			t.Logf("cleanup: deleting test location: %v", err)
+		}
+	})
+
+	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+		Name: "empty qr_token item test root", QrToken: "EMPTYQR-ITEM-LOC", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+
+	body := fmt.Sprintf(`{"name": "empty qr_token item test", "location_id": %d, "qr_token": ""}`, loc.ID)
+	req := httptest.NewRequest(http.MethodPost, "/api/items", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var created ItemDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decoding created item: %v", err)
+	}
+	if created.QrToken == "" {
+		t.Fatal("expected an auto-generated non-empty qr_token, got an empty one")
+	}
+}

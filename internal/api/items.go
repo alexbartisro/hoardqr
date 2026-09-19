@@ -234,8 +234,15 @@ func (h *ItemsHandler) create(w http.ResponseWriter, r *http.Request) {
 	if req.IsShared != nil {
 		isShared = *req.IsShared
 	}
+	// An explicit qr_token: "" is treated the same as an absent one (still
+	// auto-generated) — not as "the caller provided the empty string as
+	// their token". Same reasoning as internal/api/locations.go's create
+	// handler; lower stakes here since items.qr_token isn't unique (§3–4:
+	// the same barcode can tag several items), so there's no 409-masking
+	// failure mode, but an item stored with qr_token = "" is still
+	// unreachable by exact-code scan/search.
 	qrToken := req.QrToken
-	if qrToken == nil {
+	if qrToken == nil || strings.TrimSpace(*qrToken) == "" {
 		token := codegen.PlainTextCode()
 		qrToken = &token
 	}
