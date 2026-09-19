@@ -5,7 +5,15 @@ services:
     command: ["serve"]
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://hoardqr:${DB_PASSWORD}@hoardqr-db:5432/hoardqr
+      # sslmode=disable is required, not cosmetic: the bundled hoardqr-db
+      # image has no SSL configured, and while pgx (the app's own pool)
+      # defaults to "prefer" and falls back to plaintext on its own,
+      # golang-migrate's postgres driver goes through lib/pq, whose default
+      # is "require" — it fails outright with "pq: SSL is not enabled on
+      # the server" instead of falling back. Without this, `docker logs -f`
+      # shows "database connected" (pgx succeeding) immediately followed by
+      # "running migrations" failing, forever, on every restart attempt.
+      DATABASE_URL: postgres://hoardqr:${DB_PASSWORD}@hoardqr-db:5432/hoardqr?sslmode=disable
       AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
       SESSION_SECRET: ${SESSION_SECRET}
     ports:
@@ -22,7 +30,9 @@ services:
     command: ["mcp"]
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://hoardqr:${DB_PASSWORD}@hoardqr-db:5432/hoardqr
+      # See the hoardqr service's DATABASE_URL comment above — same fix,
+      # same reason (this run mode also calls db.Migrate at startup).
+      DATABASE_URL: postgres://hoardqr:${DB_PASSWORD}@hoardqr-db:5432/hoardqr?sslmode=disable
       MCP_API_TOKEN: ${MCP_API_TOKEN}
     ports:
       - "8081:8081"
