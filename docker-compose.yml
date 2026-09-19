@@ -5,14 +5,24 @@ services:
     command: ["serve"]
     restart: unless-stopped
     environment:
-      # sslmode=disable is required, not cosmetic: the bundled hoardqr-db
-      # image has no SSL configured, and while pgx (the app's own pool)
-      # defaults to "prefer" and falls back to plaintext on its own,
-      # golang-migrate's postgres driver goes through lib/pq, whose default
-      # is "require" — it fails outright with "pq: SSL is not enabled on
-      # the server" instead of falling back. Without this, `docker logs -f`
-      # shows "database connected" (pgx succeeding) immediately followed by
-      # "running migrations" failing, forever, on every restart attempt.
+      # sslmode=disable is required, not cosmetic — and NOT a "we turned off
+      # security" choice, despite how it reads. hoardqr-db (postgres:16-alpine)
+      # simply has no SSL configured (no certs, no ssl=on) — normal for a
+      # container reachable only over this private Compose network, never the
+      # public internet. Every other Postgres client (psql, psycopg2, JDBC —
+      # anything linking real libpq) defaults to sslmode=prefer against a
+      # server like that: try SSL, silently fall back to plaintext, connect
+      # fine, no config needed. Go's lib/pq is the outlier — its own docs
+      # (doc.go) admit its default is "require", which is NOT libpq's
+      # default, and it fails outright instead of falling back:
+      # "pq: SSL is not enabled on the server". golang-migrate's postgres
+      # driver (used once at startup by db.Migrate, not by the app's own
+      # connection pool — that's pgx, which does default to "prefer" like
+      # everything else) pulls in lib/pq, so it's the one thing here that
+      # actually needs sslmode spelled out explicitly. Without this,
+      # `docker logs -f` shows "database connected" (pgx succeeding)
+      # immediately followed by "running migrations" failing, forever, on
+      # every restart — a real outage this project hit once already.
       DATABASE_URL: postgres://hoardqr:${DB_PASSWORD}@hoardqr-db:5432/hoardqr?sslmode=disable
       AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
       SESSION_SECRET: ${SESSION_SECRET}

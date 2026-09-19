@@ -10,7 +10,7 @@ This project is built primarily by prompting AI coding assistants (Claude Code),
 
 ## Status
 
-Pre-alpha — currently being scaffolded. Nothing is deployable yet. See the commit history and issues for current progress; there's no changelog or release yet.
+Pre-alpha, but deployable — the Go backend, real Postgres schema, and MCP server are in place on the `dev` branch (a tagged `v0.0.1` release on `main` covers the earlier mocked-frontend-only milestone). Still under active development; expect rough edges and schema/API changes without migration paths. See the commit history for current progress; there's no changelog yet.
 
 ## Stack
 
@@ -24,6 +24,18 @@ docker compose up --build
 ```
 
 `docker-compose.yml` is intentionally generic — no reverse proxy, no fixed domain. If you front it with Traefik, Caddy, nginx, etc., add your own `docker-compose.override.yml` (gitignored) with the labels/networks your setup needs; Compose merges it automatically.
+
+**If your override file also sets `DATABASE_URL`**, make sure it keeps the `?sslmode=disable` suffix the shipped `docker-compose.yml` uses — an override completely replaces that environment value rather than adding to it, and dropping the suffix reintroduces a real startup failure (see below). Also remember that pulling a new image doesn't update your compose files — if you maintain your deployment outside a git checkout of this repo, re-diff your copy against `docker-compose.yml` after pulling.
+
+**Why `sslmode=disable` is there at all**, since it looks like a security downgrade and isn't one: `hoardqr-db` has no SSL configured (normal for a container that's only ever reachable over the private Compose network, not the public internet), and nearly every Postgres client defaults to trying SSL and silently falling back to plaintext when a server doesn't offer it. Go's `lib/pq` — used internally by the migration step, not by the app's own request-serving connection pool — is the one exception: its documented default is to *require* SSL and fail outright instead of falling back. Without `sslmode=disable`, `docker logs -f hoardqr` shows the app connecting fine and then migrations failing forever with `pq: SSL is not enabled on the server`.
+
+A healthy startup looks like this in `docker logs -f hoardqr`:
+```
+database connected
+migrations up to date
+hoardqr serve listening
+```
+If you see `database connected` immediately followed by `running migrations` failing on a loop, that's this — check `DATABASE_URL` first.
 
 ## License
 
