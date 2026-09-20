@@ -173,6 +173,40 @@ func TestLocationDeleteBlockedThenForced(t *testing.T) {
 	}
 }
 
+// TestLocationCreateRejectsCaseVariantDuplicate proves migration 000005's
+// idx_locations_name_ci — a real bug found in review: locations.name's
+// plain UNIQUE (migration 000004) is case-sensitive, but resolveLocation
+// (internal/mcpserver/resolve.go) and the frontend both treat names
+// case-insensitively. Without the case-insensitive index, "House" and
+// "house" could both be created, and add_storage's location param — a
+// write, not just a lookup — would silently resolve to whichever one
+// Postgres happened to return first for a case-insensitive match.
+func TestLocationCreateRejectsCaseVariantDuplicate(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	router := NewRouter(pool, t.TempDir())
+
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM locations WHERE lower(name) = lower('LOCTEST CaseVariant House')`); err != nil {
+			t.Logf("cleanup: deleting test locations: %v", err)
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/locations", strings.NewReader(`{"name": "LOCTEST CaseVariant House"}`))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for the first create, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/locations", strings.NewReader(`{"name": "loctest casevariant house"}`))
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for a case-variant duplicate name, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func decodeJSON(t *testing.T, rec *httptest.ResponseRecorder, v any) {
 	t.Helper()
 	if err := json.NewDecoder(rec.Body).Decode(v); err != nil {

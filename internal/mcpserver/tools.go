@@ -452,11 +452,20 @@ func moveItemHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[moveItemInput, moveI
 		if err != nil {
 			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
-		toStorageID, matchedToStorage, err := resolveStorage(ctx, q, in.NewStorage)
+		toStorageID, _, err := resolveStorage(ctx, q, in.NewStorage)
 		if err != nil {
 			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
 		fromBreadcrumb, err := breadcrumbText(ctx, q, fromStorageID)
+		if err != nil {
+			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
+		}
+		// Both ends of the move get the same full breadcrumb treatment —
+		// matchedToStorage alone (resolveStorage's bare matched name) used to
+		// leave `to_storage` looking like a leaf name next to `from_storage`'s
+		// full path, an asymmetry an LLM relaying this would likely repeat
+		// back to the user as a less useful destination than it actually is.
+		toBreadcrumb, err := breadcrumbText(ctx, q, toStorageID)
 		if err != nil {
 			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
@@ -498,6 +507,6 @@ func moveItemHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[moveItemInput, moveI
 			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
 
-		return nil, moveItemOutput{Item: matchedItem, FromStorage: fromBreadcrumb, ToStorage: matchedToStorage}, nil
+		return nil, moveItemOutput{Item: matchedItem, FromStorage: fromBreadcrumb, ToStorage: toBreadcrumb}, nil
 	}
 }

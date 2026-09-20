@@ -12,11 +12,13 @@
 	let resolving = $state(false);
 	let pickerItems = $state<Item[] | null>(null);
 	let notFoundCode = $state<string | null>(null);
+	let scanError = $state<string | null>(null);
 
 	async function handleDecode(code: string) {
 		resolving = true;
 		pickerItems = null;
 		notFoundCode = null;
+		scanError = null;
 		try {
 			const result = await scan(code);
 			if (result.kind === 'item') {
@@ -33,6 +35,11 @@
 			} else {
 				notFoundCode = code;
 			}
+		} catch (e) {
+			// Without this, a failed /api/scan call (network blip, 500) silently
+			// dropped back to the scanner with no indication anything went wrong
+			// — the decoded code was just lost.
+			scanError = e instanceof Error ? e.message : 'Failed to look up that code.';
 		} finally {
 			resolving = false;
 		}
@@ -41,6 +48,7 @@
 	function reset() {
 		pickerItems = null;
 		notFoundCode = null;
+		scanError = null;
 	}
 </script>
 
@@ -49,6 +57,13 @@
 
 	{#if resolving}
 		<p class="text-muted-foreground text-sm">Looking up…</p>
+	{:else if scanError}
+		<Card.Root variant="glass" class="p-4">
+			<Card.Content class="flex flex-col gap-3 p-0">
+				<p class="text-destructive text-sm">{scanError}</p>
+				<Button variant="ghost" size="sm" class="self-start" onclick={reset}>Scan again</Button>
+			</Card.Content>
+		</Card.Root>
 	{:else if pickerItems}
 		<Card.Root variant="glass" class="p-4">
 			<Card.Content class="flex flex-col gap-1 p-0">

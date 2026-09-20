@@ -17,24 +17,38 @@
 	let recentEntries = $state<{ item: Item; breadcrumb: string }[]>([]);
 	let recentTotal = $state(0);
 	let recentLoading = $state(true);
+	let recentError = $state<string | null>(null);
 
 	let roots = $state<Storage[]>([]);
 	let rootsLoading = $state(true);
+	let rootsError = $state<string | null>(null);
 
 	$effect(() => {
-		getRecentItems({ page: 1, pageSize: RECENT_PREVIEW_SIZE }).then((res) => {
-			recentEntries = res.entries;
-			recentTotal = res.total;
-			recentLoading = false;
-		});
+		getRecentItems({ page: 1, pageSize: RECENT_PREVIEW_SIZE })
+			.then((res) => {
+				recentEntries = res.entries;
+				recentTotal = res.total;
+			})
+			.catch((e) => {
+				recentError = e instanceof Error ? e.message : 'Failed to load recent items.';
+			})
+			.finally(() => {
+				recentLoading = false;
+			});
 		// Root storages for a home inventory are structurally few (rooms/areas,
 		// not hundreds) — there's no paginated storages endpoint, so fetching
 		// all of them and slicing client-side is the right call here, not a
 		// shortcut around missing pagination.
-		getStorages().then((storages) => {
-			roots = storages;
-			rootsLoading = false;
-		});
+		getStorages()
+			.then((storages) => {
+				roots = storages;
+			})
+			.catch((e) => {
+				rootsError = e instanceof Error ? e.message : 'Failed to load storages.';
+			})
+			.finally(() => {
+				rootsLoading = false;
+			});
 	});
 
 	function formatDate(iso: string): string {
@@ -76,6 +90,8 @@
 
 		{#if rootsLoading}
 			<p class="text-muted-foreground text-sm">Loading…</p>
+		{:else if rootsError}
+			<p class="text-destructive text-sm">{rootsError}</p>
 		{:else if roots.length === 0}
 			<p class="text-muted-foreground text-sm">No storage yet.</p>
 		{:else}
@@ -102,6 +118,8 @@
 
 		{#if recentLoading}
 			<p class="text-muted-foreground text-sm">Loading…</p>
+		{:else if recentError}
+			<p class="text-destructive text-sm">{recentError}</p>
 		{:else if recentEntries.length === 0}
 			<p class="text-muted-foreground text-sm">No items yet.</p>
 		{:else}

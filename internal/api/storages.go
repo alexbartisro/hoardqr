@@ -541,23 +541,31 @@ func (h *StoragesHandler) delete(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Deleting a root storage that has a location assigned must
-		// propagate that location onto any direct children it promotes to
-		// root — without this, those children would silently become
-		// unassigned instead of keeping the property they were nested
-		// inside of. Only ever relevant here (storage.ParentID == nil): a
-		// nested storage can never itself carry a location (CHECK
-		// constraint, migration 000004), so a non-root storage's
-		// LocationID is always nil. childIDs must be captured *before*
+		// Deleting a storage that has an *effective* Location — its own, if
+		// it's root, or inherited transitively via StorageBreadcrumb's root
+		// walk if it's nested several levels deep — must propagate that
+		// location onto any direct children it promotes to root, at any
+		// nesting depth. Using storage.LocationID directly here (the raw
+		// column) was a real bug: a nested storage's own LocationID is
+		// always nil (CHECK constraint, migration 000004), so deleting a
+		// nested storage silently dropped its promoted children out of
+		// their property instead of keeping it — the root-delete case had
+		// a test (TestStorageDeletePropagatesLocationToPromotedChildren),
+		// the nested case didn't. childIDs must be captured *before*
 		// DeleteStorage runs (their parent_id is about to change), but
 		// SetLocationForStorages must run *after* it — setting location_id
 		// on a storage that still has a non-null parent_id (true until the
 		// FK's ON DELETE SET NULL actually fires) trips
 		// storages_location_only_on_root itself, turning what should be an
 		// internal propagation step into a spurious 500.
+		breadcrumbRows, err := q.StorageBreadcrumb(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		_, effectiveLocation := breadcrumbAndLocation(breadcrumbRows)
+
 		var promotedChildIDs []int64
-		if storage.ParentID == nil && storage.LocationID != nil {
-			var err error
+		if effectiveLocation != nil {
 			promotedChildIDs, err = q.DirectChildStorageIDs(r.Context(), &id)
 			if err != nil {
 				return err
@@ -573,7 +581,7 @@ func (h *StoragesHandler) delete(w http.ResponseWriter, r *http.Request) {
 
 		if len(promotedChildIDs) > 0 {
 			if err := q.SetLocationForStorages(r.Context(), store.SetLocationForStoragesParams{
-				LocationID: *storage.LocationID,
+				LocationID: effectiveLocation.ID,
 				Ids:        promotedChildIDs,
 			}); err != nil {
 				return err

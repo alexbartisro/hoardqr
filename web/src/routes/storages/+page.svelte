@@ -5,12 +5,19 @@
 
 	let roots = $state<Storage[]>([]);
 	let loading = $state(true);
+	let loadError = $state<string | null>(null);
 
 	$effect(() => {
-		getStorages().then((storages) => {
-			roots = storages;
-			loading = false;
-		});
+		getStorages()
+			.then((storages) => {
+				roots = storages;
+			})
+			.catch((e) => {
+				loadError = e instanceof Error ? e.message : 'Failed to load storages.';
+			})
+			.finally(() => {
+				loading = false;
+			});
 	});
 
 	// Groups root storages by location_name, "Unassigned" last — this is the
@@ -43,6 +50,8 @@
 
 	{#if loading}
 		<p class="text-muted-foreground text-sm">Loading…</p>
+	{:else if loadError}
+		<p class="text-destructive text-sm">{loadError}</p>
 	{:else if roots.length === 0}
 		<p class="text-muted-foreground text-sm">
 			No storage yet. <a href="/storages/new" class="text-primary hover:underline">Add one →</a>

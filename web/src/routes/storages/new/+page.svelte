@@ -28,7 +28,7 @@
 	let breadcrumb = $state('');
 	let locationId = $state<number | null>(null);
 
-	// A location is only meaningful on a root storage (migration 000005's
+	// A location is only meaningful on a root storage (migration 000004's
 	// storages_location_only_on_root) — mirrors the backend's own
 	// auto-clear-on-nest behavior (internal/api/storages.go's update
 	// handler) so the frontend never even tries to submit the contradictory

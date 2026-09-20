@@ -537,6 +537,73 @@ func TestStorageDeletePropagatesLocationToPromotedChildren(t *testing.T) {
 	}
 }
 
+// TestStorageDeleteOfNestedStoragePropagatesEffectiveLocation is the nested
+// counterpart of the test above — a real bug found in review, not just a
+// hypothetical: deleting a *nested* storage (not the root itself) also
+// promotes its own direct children to root, and they must inherit the
+// property's *effective* location (resolved via StorageBreadcrumb's root
+// walk), not the deleted storage's own LocationID column — a nested
+// storage's own LocationID is always nil (storages_location_only_on_root),
+// so using it directly silently dropped the promoted grandchild out of its
+// Location entirely.
+func TestStorageDeleteOfNestedStoragePropagatesEffectiveLocation(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	location, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "LOCTEST Nested Propagate House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, location.ID) })
+
+	root, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST nested root", QrToken: "LOCNESTPROP-ROOT", IsShared: true, LocationID: &location.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage root: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, root.ID) })
+
+	middle, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST middle to delete", QrToken: "LOCNESTPROP-MIDDLE", IsShared: true, ParentID: &root.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage middle: %v", err)
+	}
+	// middle is this test's own delete subject — see the root-delete test's
+	// comment above for why this needs its own t.Cleanup even though the
+	// happy path deletes it via the HTTP request below.
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, middle.ID) })
+
+	grandchild, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST grandchild to be promoted", QrToken: "LOCNESTPROP-GRANDCHILD", IsShared: true, ParentID: &middle.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage grandchild: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, grandchild.ID) })
+
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/storages/%d", middle.ID), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	got, err := q.GetStorageByID(ctx, grandchild.ID)
+	if err != nil {
+		t.Fatalf("GetStorageByID: %v", err)
+	}
+	if got.ParentID != nil {
+		t.Fatalf("expected the grandchild to be promoted to root, still has parent_id %v", got.ParentID)
+	}
+	if got.LocationID == nil || *got.LocationID != location.ID {
+		t.Fatalf("expected the promoted grandchild to inherit the property's effective location %d (via the deleted nested storage's own root ancestor), got %v", location.ID, got.LocationID)
+	}
+}
+
 // TestStorageLocationCheckConstraintRejectsBothColumns proves the CHECK
 // constraint itself (migration 000004's storages_location_only_on_root),
 // not just the handler's pre-checks — a raw insert bypassing the API must

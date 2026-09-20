@@ -24,12 +24,17 @@
 
 	let locations = $state<Location[]>([]);
 	let loaded = $state(false);
+	let loadError = $state<string | null>(null);
 
 	$effect(() => {
-		getLocations().then((ls) => {
-			locations = ls;
-			loaded = true;
-		});
+		getLocations()
+			.then((ls) => {
+				locations = ls;
+				loaded = true;
+			})
+			.catch((e) => {
+				loadError = e instanceof Error ? e.message : 'Failed to load locations.';
+			});
 	});
 
 	// Bits UI's single-select value is a plain string — NONE is a sentinel
@@ -45,7 +50,9 @@
 	}
 </script>
 
-{#if loaded && locations.length === 0}
+{#if loadError}
+	<p class="text-destructive text-sm">{loadError}</p>
+{:else if loaded && locations.length === 0}
 	<p class="text-muted-foreground text-sm">
 		No locations yet. <a href="/locations" class="text-primary hover:underline">Add one →</a>
 	</p>

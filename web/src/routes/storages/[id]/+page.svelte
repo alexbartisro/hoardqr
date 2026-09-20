@@ -93,13 +93,23 @@
 	// breadcrumb.
 	async function handleLocationChange(newLocationId: number | null) {
 		if (!storage) return;
+		// Capture both the target id and the page's current loadSeq before
+		// the first await — if the user navigates to a different storage
+		// while this save is in flight, `storage`/`location` (and this
+		// closure's stale references to them) no longer belong to the page
+		// that's now showing, so every write below must check `seq` first
+		// rather than trusting `storage` to still mean the same thing.
+		const id = storage.id;
+		const seq = loadSeq;
 		locationSaveError = null;
 		try {
-			await updateStorage(storage.id, { location_id: newLocationId });
-			const refreshed = await getStorage(storage.id);
+			await updateStorage(id, { location_id: newLocationId });
+			const refreshed = await getStorage(id);
+			if (seq !== loadSeq) return;
 			breadcrumb = refreshed.breadcrumb;
 			location = refreshed.location;
 		} catch (e) {
+			if (seq !== loadSeq) return;
 			locationSaveError = e instanceof Error ? e.message : 'Failed to save location.';
 			selectedLocationId = location?.id ?? null; // revert the select
 		}

@@ -16,6 +16,7 @@
 	let entries = $state<{ item: Item; breadcrumb: string }[]>([]);
 	let total = $state(0);
 	let loading = $state(true);
+	let loadError = $state<string | null>(null);
 
 	// See CLAUDE.md's note on this pattern.
 	let loadSeq = 0;
@@ -23,12 +24,21 @@
 		const p = page;
 		const seq = ++loadSeq;
 		loading = true;
-		getRecentItems({ page: p, pageSize: PAGE_SIZE }).then((res) => {
-			if (seq !== loadSeq) return;
-			entries = res.entries;
-			total = res.total;
-			loading = false;
-		});
+		loadError = null;
+		getRecentItems({ page: p, pageSize: PAGE_SIZE })
+			.then((res) => {
+				if (seq !== loadSeq) return;
+				entries = res.entries;
+				total = res.total;
+			})
+			.catch((e) => {
+				if (seq !== loadSeq) return;
+				loadError = e instanceof Error ? e.message : 'Failed to load items.';
+			})
+			.finally(() => {
+				if (seq !== loadSeq) return;
+				loading = false;
+			});
 	});
 
 	let totalPages = $derived(Math.max(1, Math.ceil(total / PAGE_SIZE)));
@@ -46,6 +56,8 @@
 
 	{#if loading}
 		<p class="text-muted-foreground text-sm">Loading…</p>
+	{:else if loadError}
+		<p class="text-destructive text-sm">{loadError}</p>
 	{:else if entries.length === 0}
 		<p class="text-muted-foreground text-sm">
 			No items yet. <a href="/items/new" class="text-primary hover:underline">Add one →</a>

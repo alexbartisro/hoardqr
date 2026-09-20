@@ -37,6 +37,16 @@
 					suggestions = result;
 					searchedQuery = q;
 				}
+			} catch {
+				// Without this, a failed request left `searchedQuery` stale and
+				// `searching` never cleared for this query — the dropdown showed
+				// "Searching…" forever. Degrade to a quiet "no results" instead of
+				// a visible error, since this is a compact autocomplete, not a
+				// full page — the header search bar remains usable either way.
+				if (seq === searchSeq) {
+					suggestions = [];
+					searchedQuery = q;
+				}
 			} finally {
 				if (seq === searchSeq) searching = false;
 			}

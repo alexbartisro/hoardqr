@@ -1,0 +1,17 @@
+-- locations.name's plain UNIQUE (migration 000004) is case-sensitive, but
+-- resolveLocation (internal/mcpserver/resolve.go) and the frontend both
+-- treat location names case-insensitively — "House" and "house" both pass
+-- the raw UNIQUE constraint (different strings) but collide once
+-- case-folded, so the second one is unreachable by its own name. Unlike
+-- storages' qr_token normalization (migration 000002), there's no
+-- normalized-lookup index backing this yet — resolveLocation's
+-- FindLocationByName is a plain `:one` query with no ORDER BY, so a
+-- duplicate silently resolves to whichever row Postgres happens to return
+-- first, with no error. Since add_storage's `location` param is a write
+-- (not just a lookup), that's a real "silently mutate the wrong data"
+-- failure mode, not just an inconvenience.
+--
+-- No pre-check for existing collisions before creating this: no production
+-- data yet (see CLAUDE.md's migration-consolidation note), so this is a
+-- cheap fix now rather than something to guard against.
+CREATE UNIQUE INDEX idx_locations_name_ci ON locations (lower(name));
