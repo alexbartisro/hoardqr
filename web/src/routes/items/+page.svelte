@@ -52,7 +52,10 @@
 </script>
 
 <div class="flex flex-col gap-4">
-	<h1 class="text-xl font-semibold">Objects</h1>
+	<div class="flex items-center justify-between gap-2">
+		<h1 class="text-xl font-semibold">Objects</h1>
+		<Button size="sm" href="/items/new">+ Add Object</Button>
+	</div>
 
 	{#if loading}
 		<p class="text-muted-foreground text-sm">Loading…</p>

@@ -2,6 +2,7 @@
 	import { getStorages } from '$lib/api';
 	import type { Storage } from '$lib/types';
 	import StorageTreeNode from '$lib/components/storage-tree-node.svelte';
+	import { Button } from '$lib/components/ui/button';
 
 	let roots = $state<Storage[]>([]);
 	let loading = $state(true);
@@ -43,9 +44,12 @@
 </script>
 
 <div class="flex flex-col gap-4">
-	<div class="flex items-center justify-between">
+	<div class="flex items-center justify-between gap-2">
 		<h1 class="text-xl font-semibold">Storage</h1>
-		<a href="/locations" class="text-primary text-sm hover:underline">Manage locations</a>
+		<div class="flex items-center gap-3">
+			<a href="/locations" class="text-primary text-sm hover:underline">Manage locations</a>
+			<Button size="sm" href="/storages/new">+ Add Storage</Button>
+		</div>
 	</div>
 
 	{#if loading}
