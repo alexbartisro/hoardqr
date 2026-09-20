@@ -458,40 +458,42 @@ func (h *StoragesHandler) update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toStorageDTO(storage))
 }
 
-// DELETE /api/storages/:id?force= (§3). Child storages always become
-// root-level automatically (the FK's ON DELETE SET NULL fires as part of the
-// DELETE below) — never blocked, never forced. The only case requiring
-// force=true is a root storage that still directly holds items: nowhere to
-// promote them to.
+// DELETE /api/storages/:id (§3). Child storages always become root-level
+// automatically (the FK's ON DELETE SET NULL fires as part of the DELETE
+// below) — never blocked. A root storage that still directly holds items
+// always 409s, with no override — deleting a storage must never delete the
+// items inside it (user decision, 2026-09-20, reversing this handler's
+// original `?force=true` escape hatch, which used to delete those items
+// outright; see CLAUDE.md). The caller must move the items elsewhere first
+// (PATCH their storage_id, or MCP's move_item) and retry.
 //
-// Runs as one transaction: promoting (or force-deleting) the direct items
-// and then deleting the storage are two-to-three separate statements, and
-// the force branch is destructive — if DeleteStorage failed after
-// DeleteItemsAtStorage had already committed, those items would be gone
-// for good with the storage they were deleted from still sitting there.
+// Runs as one transaction: promoting the direct items to a parent (when
+// there is one) and then deleting the storage are two separate statements,
+// and if DeleteStorage failed after PromoteItemsToParent had already
+// committed, those items would be left pointing at a parent that never
+// actually got the storage removed underneath it as the caller expected.
 //
-// The item-clearing step (CountDirectItemsAtStorage+maybe DeleteItemsAtStorage
-// for a root storage, PromoteItemsToParent for a non-root one) happens
-// inside this transaction, but under Postgres's default READ COMMITTED
-// isolation that only guarantees each statement its own up-to-date
-// snapshot, not a snapshot frozen for the whole transaction — it does NOT
-// close the race a stronger isolation level would, and the hazard is the
-// same in both branches: a direct item concurrently inserted into this
-// storage right after its item-clearing statement runs (and commits
+// The item-clearing step (CountDirectItemsAtStorage for a root storage,
+// PromoteItemsToParent for a non-root one) happens inside this transaction,
+// but under Postgres's default READ COMMITTED isolation that only
+// guarantees each statement its own up-to-date snapshot, not a snapshot
+// frozen for the whole transaction — it does NOT close the race a stronger
+// isolation level would: a direct item concurrently inserted into this
+// storage right after CountDirectItemsAtStorage runs (and commits
 // elsewhere) but before this transaction's later DeleteStorage statement
 // is still there when DeleteStorage runs, and items.storage_id is ON
 // DELETE RESTRICT (migrations/000001_init.up.sql), so DeleteStorage fails
 // outright. Verified empirically with two concurrent psql sessions on both
-// branches: a storage correctly counted/promoted as having no direct
-// items still ends up failing DeleteStorage with a raw 23503
+// branches: a storage correctly counted/promoted as having no direct items
+// still ends up failing DeleteStorage with a raw 23503
 // (foreign-key-violation) once a concurrent insert lands in the gap. No
 // data corruption either way: the FK's RESTRICT is what stops it, rolling
 // the whole transaction back rather than leaving the concurrently-inserted
 // item pointing at a storage that got deleted anyway. Worst case is a
 // request that should have cleanly 409'd (root) or actually succeeded
-// against the pre-race state (non-root) failing loudly with an uncaught
-// 500 instead of a retry-worthy error — so this is flagged rather than
-// fixed with a stronger isolation level or an explicit row lock; SERIALIZABLE (or
+// against the pre-race state (non-root) failing loudly with an uncaught 500
+// instead of a retry-worthy error — so this is flagged rather than fixed
+// with a stronger isolation level or an explicit row lock; SERIALIZABLE (or
 // SELECT ... FOR UPDATE on the storage row) would close it if this ever
 // becomes a real problem in practice.
 func (h *StoragesHandler) delete(w http.ResponseWriter, r *http.Request) {
@@ -500,7 +502,6 @@ func (h *StoragesHandler) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	force := r.URL.Query().Get("force") == "true"
 
 	var status int
 	var message string
@@ -530,14 +531,9 @@ func (h *StoragesHandler) delete(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			if count > 0 {
-				if !force {
-					status, message = http.StatusConflict,
-						"storage holds items directly and has no parent to promote them to — retry with force=true"
-					return errHandled
-				}
-				if err := q.DeleteItemsAtStorage(r.Context(), id); err != nil {
-					return err
-				}
+				status, message = http.StatusConflict,
+					"storage holds items directly and has no parent to promote them to — move them to another storage first, then retry"
+				return errHandled
 			}
 		}
 

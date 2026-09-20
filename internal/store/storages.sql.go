@@ -27,17 +27,6 @@ func (q *Queries) CountDirectItemsAtStorage(ctx context.Context, storageID int64
 	return count, err
 }
 
-const deleteItemsAtStorage = `-- name: DeleteItemsAtStorage :exec
-DELETE FROM items WHERE storage_id = $1
-`
-
-// Only used for the root-storage force-delete case (§3) — a root storage
-// has no parent to promote its direct items to.
-func (q *Queries) DeleteItemsAtStorage(ctx context.Context, storageID int64) error {
-	_, err := q.db.Exec(ctx, deleteItemsAtStorage, storageID)
-	return err
-}
-
 const deleteStorage = `-- name: DeleteStorage :exec
 DELETE FROM storages WHERE id = $1
 `

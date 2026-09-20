@@ -83,9 +83,12 @@ export async function updateStorage(id: number, patch: Partial<Storage>): Promis
 	return apiFetch(`/api/storages/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
 }
 
-// --- DELETE /api/storages/:id?force= (§3) ---
-export async function deleteStorage(id: number, opts: { force?: boolean } = {}): Promise<void> {
-	return apiFetch(`/api/storages/${id}${queryString({ force: opts.force })}`, { method: 'DELETE' });
+// --- DELETE /api/storages/:id (§3) ---
+// No force option: deleting a storage must never delete the items inside
+// it (2026-09-20) — a root storage holding items directly always 409s, and
+// the caller has to move those items elsewhere first.
+export async function deleteStorage(id: number): Promise<void> {
+	return apiFetch(`/api/storages/${id}`, { method: 'DELETE' });
 }
 
 // --- GET /api/locations ---

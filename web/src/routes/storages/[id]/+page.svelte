@@ -6,7 +6,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { deleteStorage, getItems, getStorage, getStorages, updateStorage } from '$lib/api';
-	import { ApiError, type Breadcrumb, type Item, type Location, type Storage } from '$lib/types';
+	import type { Breadcrumb, Item, Location, Storage } from '$lib/types';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -136,16 +136,20 @@
 	}
 
 	// A root storage (no parent) that still directly holds items has nowhere
-	// to promote them to — the backend 409s and asks for ?force=true, which
-	// deletes those items outright (see internal/api/storages.go's delete
-	// handler). Direct items in a non-root storage promote to this
-	// storage's own parent, matching where the confirm dialog sends the user
-	// afterward — no extra warning needed for those. Child *storages* are a
-	// different story: the FK's ON DELETE SET NULL promotes them straight to
-	// the root level, not to this storage's parent (verified empirically —
-	// see commit message), so without a warning "Shelf 2" just disappears
-	// from view (there's no storage-tree browse UI, only search/scan can
-	// find a root-level storage again).
+	// to promote them to — the backend always 409s in that case, with no
+	// override (user decision, 2026-09-20: deleting a storage must never
+	// delete the items inside it, reversing this handler's old
+	// `?force=true` escape hatch — see internal/api/storages.go's delete
+	// handler and CLAUDE.md). The 409's own message tells the user to move
+	// those items elsewhere first; there's nothing left to retry here.
+	// Direct items in a non-root storage promote to this storage's own
+	// parent, matching where the confirm dialog sends the user afterward —
+	// no extra warning needed for those. Child *storages* are a different
+	// story: the FK's ON DELETE SET NULL promotes them straight to the root
+	// level, not to this storage's parent (verified empirically — see
+	// commit message), so without a warning "Shelf 2" just disappears from
+	// view (there's no storage-tree browse UI, only search/scan can find a
+	// root-level storage again).
 	async function handleDelete() {
 		if (!storage) return;
 		// Only worth flagging as a divergence when this storage itself has a
@@ -173,23 +177,9 @@
 			await deleteStorage(storage.id);
 			await goto(storage.parent_id ? `/storages/${storage.parent_id}` : '/');
 		} catch (e) {
-			if (
-				e instanceof ApiError &&
-				e.status === 409 &&
-				confirm(
-					`"${storage.name}" holds items directly and has no parent to promote them to.\n\nDelete it along with everything inside it?`
-				)
-			) {
-				try {
-					await deleteStorage(storage.id, { force: true });
-					await goto(storage.parent_id ? `/storages/${storage.parent_id}` : '/');
-					return;
-				} catch (e2) {
-					deleteError = e2 instanceof Error ? e2.message : 'Failed to delete storage.';
-					deleting = false;
-					return;
-				}
-			}
+			// ApiError's own message already names the 409 case clearly
+			// ("...has no parent to promote them to — move them to another
+			// storage first, then retry") — no special-casing needed here.
 			deleteError = e instanceof Error ? e.message : 'Failed to delete storage.';
 			deleting = false;
 		}

@@ -16,28 +16,38 @@ import (
 	"hoardqr/internal/store"
 )
 
-// TestStorageDeleteForceRollsBackOnFailure proves the fix for
-// StoragesHandler.delete's force-delete branch: DeleteItemsAtStorage and
-// DeleteStorage must commit or fail together. Before this fix they were two
-// separate statements outside any transaction — a failure between them
-// would have permanently destroyed the items while leaving the storage
-// (now holding none directly) still in place. Exercises the real generated
-// queries, not raw SQL, so it tracks the actual handler code path.
-func TestStorageDeleteForceRollsBackOnFailure(t *testing.T) {
+// TestStorageDeletePromoteRollsBackOnFailure proves the delete transaction
+// still commits-or-fails-together now that the destructive force branch is
+// gone (see TestStorageDeleteWithDirectItemsAlwaysConflicts below) — the
+// remaining multi-statement path (PromoteItemsToParent, then DeleteStorage)
+// is still real: a failure between the two would otherwise leave an item
+// already moved to the parent while the child storage it was promoted out
+// of is still sitting there, unpromoted-looking to anything that reads it
+// again. Exercises the real generated queries, not raw SQL, so it tracks
+// the actual handler code path.
+func TestStorageDeletePromoteRollsBackOnFailure(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	q := store.New(pool)
 
-	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
-		Name: "tx rollback root", QrToken: "TXTEST-LOC-ROLLBACK", IsShared: true,
+	root, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "tx rollback promote root", QrToken: "TXTEST-PROMOTE-ROOT", IsShared: true,
 	})
 	if err != nil {
-		t.Fatalf("InsertStorage: %v", err)
+		t.Fatalf("InsertStorage(root): %v", err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, storage.ID) })
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, root.ID) })
+
+	child, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "tx rollback promote child", QrToken: "TXTEST-PROMOTE-CHILD", IsShared: true, ParentID: &root.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage(child): %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, child.ID) })
 
 	item, err := q.InsertItem(ctx, store.InsertItemParams{
-		StorageID: storage.ID, Name: "item that must survive", QrToken: "TXTEST-ITEM-ROLLBACK",
+		StorageID: child.ID, Name: "item that must not move", QrToken: "TXTEST-ITEM-PROMOTE",
 		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
 	})
 	if err != nil {
@@ -45,10 +55,12 @@ func TestStorageDeleteForceRollsBackOnFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID) })
 
-	sentinel := errors.New("forced failure between deleting items and deleting the storage")
+	sentinel := errors.New("forced failure between promoting items and deleting the storage")
 	err = withTx(ctx, pool, func(tx pgx.Tx) error {
 		txq := store.New(tx)
-		if err := txq.DeleteItemsAtStorage(ctx, storage.ID); err != nil {
+		if err := txq.PromoteItemsToParent(ctx, store.PromoteItemsToParentParams{
+			NewStorageID: root.ID, OldStorageID: child.ID,
+		}); err != nil {
 			return err
 		}
 		return sentinel // never reaches DeleteStorage
@@ -57,19 +69,73 @@ func TestStorageDeleteForceRollsBackOnFailure(t *testing.T) {
 		t.Fatalf("expected sentinel error, got %v", err)
 	}
 
+	reloaded, err := q.GetItemByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("GetItemByID: %v", err)
+	}
+	if reloaded.StorageID != child.ID {
+		t.Fatalf("item was permanently promoted to the parent even though the transaction that promoted it was rolled back (storage_id = %d, want %d)", reloaded.StorageID, child.ID)
+	}
+	childExists, err := q.StorageExists(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("StorageExists: %v", err)
+	}
+	if !childExists {
+		t.Fatal("child storage should still exist — DeleteStorage never ran")
+	}
+}
+
+// TestStorageDeleteWithDirectItemsAlwaysConflicts proves the current rule:
+// a root storage holding items directly always 409s on delete, with no
+// override — deleting a storage must never delete the items inside it
+// (user decision, 2026-09-20, reversing the old `?force=true` escape hatch
+// that used to delete those items outright; see CLAUDE.md). Exercises the
+// real handler end-to-end, including that a `force=true` query param (a
+// caller might still send it out of habit, or from stale API docs) is
+// silently ignored rather than treated as a real toggle.
+func TestStorageDeleteWithDirectItemsAlwaysConflicts(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "delete-blocked root", QrToken: "TXTEST-LOC-NOFORCE", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, storage.ID) })
+
+	item, err := q.InsertItem(ctx, store.InsertItemParams{
+		StorageID: storage.ID, Name: "item that must survive", QrToken: "TXTEST-ITEM-NOFORCE",
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID) })
+
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/storages/%d?force=true", storage.ID), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 even with force=true, got %d: %s", rec.Code, rec.Body.String())
+	}
+
 	itemExists, err := q.ItemExists(ctx, item.ID)
 	if err != nil {
 		t.Fatalf("ItemExists: %v", err)
 	}
 	if !itemExists {
-		t.Fatal("item was permanently deleted even though the transaction that deleted it was rolled back")
+		t.Fatal("item was deleted — force=true must no longer do this")
 	}
-	locExists, err := q.StorageExists(ctx, storage.ID)
+	storageExists, err := q.StorageExists(ctx, storage.ID)
 	if err != nil {
 		t.Fatalf("StorageExists: %v", err)
 	}
-	if !locExists {
-		t.Fatal("storage should still exist — DeleteStorage never ran")
+	if !storageExists {
+		t.Fatal("storage should still exist — the delete must have been rejected")
 	}
 }
 

@@ -99,11 +99,6 @@ SELECT count(*) FROM items WHERE storage_id = $1;
 UPDATE items SET storage_id = sqlc.arg(new_storage_id)::bigint
 WHERE storage_id = sqlc.arg(old_storage_id)::bigint;
 
--- name: DeleteItemsAtStorage :exec
--- Only used for the root-storage force-delete case (§3) — a root storage
--- has no parent to promote its direct items to.
-DELETE FROM items WHERE storage_id = $1;
-
 -- name: DeleteStorage :exec
 DELETE FROM storages WHERE id = $1;
 
