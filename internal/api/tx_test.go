@@ -36,8 +36,8 @@ func testPool(t *testing.T) *pgxpool.Pool {
 
 // TestWithTxRollsBackOnError proves the actual bug this fixes: a
 // multi-statement write where a later statement fails must undo the earlier
-// one, not leave a half-written row behind. Inserts a location, then forces
-// an error before commit, and asserts the location was never persisted.
+// one, not leave a half-written row behind. Inserts a storage, then forces
+// an error before commit, and asserts the storage was never persisted.
 func TestWithTxRollsBackOnError(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
@@ -47,7 +47,7 @@ func TestWithTxRollsBackOnError(t *testing.T) {
 
 	err := withTx(ctx, pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO locations (name, qr_token) VALUES ($1, $2)`, "tx rollback test", tokenA,
+			`INSERT INTO storages (name, qr_token) VALUES ($1, $2)`, "tx rollback test", tokenA,
 		); err != nil {
 			return err
 		}
@@ -58,7 +58,7 @@ func TestWithTxRollsBackOnError(t *testing.T) {
 	}
 
 	var count int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM locations WHERE qr_token = $1`, tokenA).Scan(&count); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM storages WHERE qr_token = $1`, tokenA).Scan(&count); err != nil {
 		t.Fatalf("querying: %v", err)
 	}
 	if count != 0 {
@@ -76,7 +76,7 @@ func TestWithTxCommitsOnSuccess(t *testing.T) {
 
 	err := withTx(ctx, pool, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
-			`INSERT INTO locations (name, qr_token) VALUES ($1, $2)`, "tx commit test", tokenB,
+			`INSERT INTO storages (name, qr_token) VALUES ($1, $2)`, "tx commit test", tokenB,
 		)
 		return err
 	})
@@ -84,11 +84,11 @@ func TestWithTxCommitsOnSuccess(t *testing.T) {
 		t.Fatalf("withTx: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM locations WHERE qr_token = $1`, tokenB)
+		_, _ = pool.Exec(ctx, `DELETE FROM storages WHERE qr_token = $1`, tokenB)
 	})
 
 	var count int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM locations WHERE qr_token = $1`, tokenB).Scan(&count); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM storages WHERE qr_token = $1`, tokenB).Scan(&count); err != nil {
 		t.Fatalf("querying: %v", err)
 	}
 	if count != 1 {

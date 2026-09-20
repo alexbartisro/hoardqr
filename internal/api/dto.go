@@ -16,7 +16,7 @@ import (
 // pgtype.Date, pgtype.Timestamptz) since none of those marshal to JSON in
 // the plain shape the frontend already expects.
 
-type LocationDTO struct {
+type StorageDTO struct {
 	ID        int64   `json:"id"`
 	ParentID  *int64  `json:"parent_id"`
 	OwnerID   *int64  `json:"owner_id"`
@@ -28,24 +28,24 @@ type LocationDTO struct {
 	CreatedAt string  `json:"created_at"`
 }
 
-func toLocationDTO(l store.Location) LocationDTO {
-	return LocationDTO{
-		ID:        l.ID,
-		ParentID:  l.ParentID,
-		OwnerID:   l.OwnerID,
-		IsShared:  l.IsShared,
-		Name:      l.Name,
-		QrToken:   l.QrToken,
-		PhotoURL:  l.PhotoUrl,
-		Notes:     l.Notes,
-		CreatedAt: timestamptzToString(l.CreatedAt),
+func toStorageDTO(s store.Storage) StorageDTO {
+	return StorageDTO{
+		ID:        s.ID,
+		ParentID:  s.ParentID,
+		OwnerID:   s.OwnerID,
+		IsShared:  s.IsShared,
+		Name:      s.Name,
+		QrToken:   s.QrToken,
+		PhotoURL:  s.PhotoUrl,
+		Notes:     s.Notes,
+		CreatedAt: timestamptzToString(s.CreatedAt),
 	}
 }
 
-func toLocationDTOs(ls []store.Location) []LocationDTO {
-	out := make([]LocationDTO, len(ls))
-	for i, l := range ls {
-		out[i] = toLocationDTO(l)
+func toStorageDTOs(ss []store.Storage) []StorageDTO {
+	out := make([]StorageDTO, len(ss))
+	for i, s := range ss {
+		out[i] = toStorageDTO(s)
 	}
 	return out
 }
@@ -57,7 +57,7 @@ type BreadcrumbEntryDTO struct {
 
 type ItemDTO struct {
 	ID            int64           `json:"id"`
-	LocationID    int64           `json:"location_id"`
+	StorageID     int64           `json:"storage_id"`
 	OwnerID       *int64          `json:"owner_id"`
 	IsShared      bool            `json:"is_shared"`
 	Name          string          `json:"name"`
@@ -77,12 +77,12 @@ type ItemDTO struct {
 
 // itemFields is the shape every item-returning sqlc query shares — Item
 // (from InsertItem, which has no Tags column) and the four GROUP BY variants
-// (GetItemByIDRow, ListItemsRow, ListItemsByLocationIDsRow,
+// (GetItemByIDRow, ListItemsRow, ListItemsByStorageIDsRow,
 // ListRecentItemsRow) all have identical fields but distinct generated
 // struct types, so each gets a thin wrapper into this one conversion.
 type itemFields struct {
 	ID            int64
-	LocationID    int64
+	StorageID     int64
 	OwnerID       *int64
 	IsShared      bool
 	Name          string
@@ -105,7 +105,7 @@ func toItemDTO(f itemFields, tags []string) ItemDTO {
 	}
 	return ItemDTO{
 		ID:            f.ID,
-		LocationID:    f.LocationID,
+		StorageID:     f.StorageID,
 		OwnerID:       f.OwnerID,
 		IsShared:      f.IsShared,
 		Name:          f.Name,
@@ -130,7 +130,7 @@ func toItemDTOFromItem(i store.Item, tags []string) ItemDTO {
 
 func toItemDTOFromGetRow(r store.GetItemByIDRow) ItemDTO {
 	return toItemDTO(itemFields{
-		ID: r.ID, LocationID: r.LocationID, OwnerID: r.OwnerID, IsShared: r.IsShared,
+		ID: r.ID, StorageID: r.StorageID, OwnerID: r.OwnerID, IsShared: r.IsShared,
 		Name: r.Name, Description: r.Description, Quantity: r.Quantity, Condition: r.Condition,
 		QrToken: r.QrToken, PhotoUrl: r.PhotoUrl, PurchaseDate: r.PurchaseDate,
 		PurchasePrice: r.PurchasePrice, ReceiptUrl: r.ReceiptUrl, CustomFields: r.CustomFields,
@@ -140,7 +140,7 @@ func toItemDTOFromGetRow(r store.GetItemByIDRow) ItemDTO {
 
 func toItemDTOFromListRow(r store.ListItemsRow) ItemDTO {
 	return toItemDTO(itemFields{
-		ID: r.ID, LocationID: r.LocationID, OwnerID: r.OwnerID, IsShared: r.IsShared,
+		ID: r.ID, StorageID: r.StorageID, OwnerID: r.OwnerID, IsShared: r.IsShared,
 		Name: r.Name, Description: r.Description, Quantity: r.Quantity, Condition: r.Condition,
 		QrToken: r.QrToken, PhotoUrl: r.PhotoUrl, PurchaseDate: r.PurchaseDate,
 		PurchasePrice: r.PurchasePrice, ReceiptUrl: r.ReceiptUrl, CustomFields: r.CustomFields,
@@ -148,9 +148,9 @@ func toItemDTOFromListRow(r store.ListItemsRow) ItemDTO {
 	}, r.Tags)
 }
 
-func toItemDTOFromContentsRow(r store.ListItemsByLocationIDsRow) ItemDTO {
+func toItemDTOFromContentsRow(r store.ListItemsByStorageIDsRow) ItemDTO {
 	return toItemDTO(itemFields{
-		ID: r.ID, LocationID: r.LocationID, OwnerID: r.OwnerID, IsShared: r.IsShared,
+		ID: r.ID, StorageID: r.StorageID, OwnerID: r.OwnerID, IsShared: r.IsShared,
 		Name: r.Name, Description: r.Description, Quantity: r.Quantity, Condition: r.Condition,
 		QrToken: r.QrToken, PhotoUrl: r.PhotoUrl, PurchaseDate: r.PurchaseDate,
 		PurchasePrice: r.PurchasePrice, ReceiptUrl: r.ReceiptUrl, CustomFields: r.CustomFields,
@@ -160,7 +160,7 @@ func toItemDTOFromContentsRow(r store.ListItemsByLocationIDsRow) ItemDTO {
 
 func toItemDTOFromScanRow(r store.FindItemsByNormalizedCodeRow) ItemDTO {
 	return toItemDTO(itemFields{
-		ID: r.ID, LocationID: r.LocationID, OwnerID: r.OwnerID, IsShared: r.IsShared,
+		ID: r.ID, StorageID: r.StorageID, OwnerID: r.OwnerID, IsShared: r.IsShared,
 		Name: r.Name, Description: r.Description, Quantity: r.Quantity, Condition: r.Condition,
 		QrToken: r.QrToken, PhotoUrl: r.PhotoUrl, PurchaseDate: r.PurchaseDate,
 		PurchasePrice: r.PurchasePrice, ReceiptUrl: r.ReceiptUrl, CustomFields: r.CustomFields,
@@ -170,7 +170,7 @@ func toItemDTOFromScanRow(r store.FindItemsByNormalizedCodeRow) ItemDTO {
 
 func toItemDTOFromRecentRow(r store.ListRecentItemsRow) ItemDTO {
 	return toItemDTO(itemFields{
-		ID: r.ID, LocationID: r.LocationID, OwnerID: r.OwnerID, IsShared: r.IsShared,
+		ID: r.ID, StorageID: r.StorageID, OwnerID: r.OwnerID, IsShared: r.IsShared,
 		Name: r.Name, Description: r.Description, Quantity: r.Quantity, Condition: r.Condition,
 		QrToken: r.QrToken, PhotoUrl: r.PhotoUrl, PurchaseDate: r.PurchaseDate,
 		PurchasePrice: r.PurchasePrice, ReceiptUrl: r.ReceiptUrl, CustomFields: r.CustomFields,
@@ -179,15 +179,15 @@ func toItemDTOFromRecentRow(r store.ListRecentItemsRow) ItemDTO {
 }
 
 // SearchSuggestionDTO mirrors SearchSuggestion in web/src/lib/types.ts.
-// LocationID/Breadcrumb are only ever set on item hits (optional fields on
-// the frontend type) — omitempty so a location/tag hit's JSON simply omits
+// StorageID/Breadcrumb are only ever set on item hits (optional fields on
+// the frontend type) — omitempty so a storage/tag hit's JSON simply omits
 // them rather than sending explicit nulls.
 type SearchSuggestionDTO struct {
 	Kind       string  `json:"kind"`
 	ID         int64   `json:"id"`
 	Name       string  `json:"name"`
 	Score      float32 `json:"score"`
-	LocationID *int64  `json:"location_id,omitempty"`
+	StorageID  *int64  `json:"storage_id,omitempty"`
 	Breadcrumb *string `json:"breadcrumb,omitempty"`
 }
 

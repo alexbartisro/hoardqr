@@ -11,7 +11,7 @@ import (
 )
 
 // SearchHandler backs §5's unified autocomplete and §6/§7's scan resolution.
-// Unlike LocationsHandler/ItemsHandler/TagsHandler these three routes don't
+// Unlike StoragesHandler/ItemsHandler/TagsHandler these three routes don't
 // share a path prefix, so they're mounted individually in router.go instead
 // of via a Routes(r chi.Router) method.
 type SearchHandler struct {
@@ -23,8 +23,8 @@ func NewSearchHandler(pool *pgxpool.Pool) *SearchHandler {
 }
 
 // GET /api/search/suggest?q= (§5) — live autocomplete across items,
-// locations, and tags; item hits include their own location_id + breadcrumb
-// (no second lookup needed on the frontend). location_id comes straight off
+// storages, and tags; item hits include their own storage_id + breadcrumb
+// (no second lookup needed on the frontend). storage_id comes straight off
 // the SearchSuggest row (a LEFT JOIN within that one query, not a separate
 // per-hit round trip) — see the query's own comment for why that matters.
 func (h *SearchHandler) Suggest(w http.ResponseWriter, r *http.Request) {
@@ -43,13 +43,13 @@ func (h *SearchHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	suggestions := make([]SearchSuggestionDTO, len(rows))
 	for i, row := range rows {
 		s := SearchSuggestionDTO{Kind: row.Kind, ID: row.ID, Name: row.Name, Score: row.Score}
-		if row.Kind == "item" && row.LocationID != nil {
-			breadcrumb, err := h.breadcrumbText(r.Context(), *row.LocationID)
+		if row.Kind == "item" && row.StorageID != nil {
+			breadcrumb, err := h.breadcrumbText(r.Context(), *row.StorageID)
 			if err != nil {
 				serverError(w, r, err)
 				return
 			}
-			s.LocationID = row.LocationID
+			s.StorageID = row.StorageID
 			s.Breadcrumb = &breadcrumb
 		}
 		suggestions[i] = s
@@ -57,8 +57,8 @@ func (h *SearchHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, suggestions)
 }
 
-func (h *SearchHandler) breadcrumbText(ctx context.Context, locationID int64) (string, error) {
-	crumb, err := h.q.LocationBreadcrumb(ctx, locationID)
+func (h *SearchHandler) breadcrumbText(ctx context.Context, storageID int64) (string, error) {
+	crumb, err := h.q.StorageBreadcrumb(ctx, storageID)
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +69,7 @@ func (h *SearchHandler) breadcrumbText(ctx context.Context, locationID int64) (s
 	return strings.Join(names, " > "), nil
 }
 
-// GET /api/scan?code= (§6) — resolve a scanned code to item(s), a location,
+// GET /api/scan?code= (§6) — resolve a scanned code to item(s), a storage,
 // or no match.
 func (h *SearchHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
@@ -88,7 +88,7 @@ func (h *SearchHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	location, err := h.q.FindLocationByNormalizedCode(r.Context(), code)
+	storage, err := h.q.FindStorageByNormalizedCode(r.Context(), code)
 	if isNoRows(err) {
 		writeJSON(w, http.StatusOK, map[string]any{"kind": "none"})
 		return
@@ -97,14 +97,14 @@ func (h *SearchHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		serverError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"kind": "location", "location": toLocationDTO(location)})
+	writeJSON(w, http.StatusOK, map[string]any{"kind": "storage", "storage": toStorageDTO(storage)})
 }
 
-// GET /api/resolve-location?code= (§7) — the Location Picker's scan-tab
-// equivalent: always resolves to a location_id (an item code resolves to
-// *its* location), or the same ambiguous-items picker as Scan when several
+// GET /api/resolve-storage?code= (§7) — the Storage Picker's scan-tab
+// equivalent: always resolves to a storage_id (an item code resolves to
+// *its* storage), or the same ambiguous-items picker as Scan when several
 // items share the code, or none.
-func (h *SearchHandler) ResolveLocation(w http.ResponseWriter, r *http.Request) {
+func (h *SearchHandler) ResolveStorage(w http.ResponseWriter, r *http.Request) {
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
 	if code == "" {
 		writeError(w, http.StatusBadRequest, "code is required")
@@ -117,7 +117,7 @@ func (h *SearchHandler) ResolveLocation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if len(items) == 1 {
-		writeJSON(w, http.StatusOK, map[string]any{"kind": "location", "location_id": items[0].LocationID})
+		writeJSON(w, http.StatusOK, map[string]any{"kind": "storage", "storage_id": items[0].StorageID})
 		return
 	}
 	if len(items) > 1 {
@@ -125,7 +125,7 @@ func (h *SearchHandler) ResolveLocation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	location, err := h.q.FindLocationByNormalizedCode(r.Context(), code)
+	storage, err := h.q.FindStorageByNormalizedCode(r.Context(), code)
 	if isNoRows(err) {
 		writeJSON(w, http.StatusOK, map[string]any{"kind": "none"})
 		return
@@ -134,7 +134,7 @@ func (h *SearchHandler) ResolveLocation(w http.ResponseWriter, r *http.Request) 
 		serverError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"kind": "location", "location_id": location.ID})
+	writeJSON(w, http.StatusOK, map[string]any{"kind": "storage", "storage_id": storage.ID})
 }
 
 func toItemDTOsFromScanRows(rows []store.FindItemsByNormalizedCodeRow) []ItemDTO {

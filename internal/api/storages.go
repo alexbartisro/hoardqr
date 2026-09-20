@@ -17,16 +17,16 @@ import (
 	"hoardqr/internal/store"
 )
 
-type LocationsHandler struct {
+type StoragesHandler struct {
 	pool *pgxpool.Pool
 	q    *store.Queries
 }
 
-func NewLocationsHandler(pool *pgxpool.Pool) *LocationsHandler {
-	return &LocationsHandler{pool: pool, q: store.New(pool)}
+func NewStoragesHandler(pool *pgxpool.Pool) *StoragesHandler {
+	return &StoragesHandler{pool: pool, q: store.New(pool)}
 }
 
-func (h *LocationsHandler) Routes(r chi.Router) {
+func (h *StoragesHandler) Routes(r chi.Router) {
 	r.Get("/", h.list)
 	r.Post("/", h.create)
 	r.Get("/{id}", h.get)
@@ -39,10 +39,10 @@ func parseIDParam(r *http.Request) (int64, error) {
 	return strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 }
 
-// breadcrumbDTO fetches and shapes a location's root-to-leaf path — shared
-// by every handler below that needs one alongside the location/item itself.
-func (h *LocationsHandler) breadcrumbDTO(ctx context.Context, locationID int64) ([]BreadcrumbEntryDTO, error) {
-	rows, err := h.q.LocationBreadcrumb(ctx, locationID)
+// breadcrumbDTO fetches and shapes a storage's root-to-leaf path — shared
+// by every handler below that needs one alongside the storage/item itself.
+func (h *StoragesHandler) breadcrumbDTO(ctx context.Context, storageID int64) ([]BreadcrumbEntryDTO, error) {
+	rows, err := h.q.StorageBreadcrumb(ctx, storageID)
 	if err != nil {
 		return nil, err
 	}
@@ -53,8 +53,8 @@ func (h *LocationsHandler) breadcrumbDTO(ctx context.Context, locationID int64) 
 	return out, nil
 }
 
-// GET /api/locations?parent_id=
-func (h *LocationsHandler) list(w http.ResponseWriter, r *http.Request) {
+// GET /api/storages?parent_id=
+func (h *StoragesHandler) list(w http.ResponseWriter, r *http.Request) {
 	var parentID *int64
 	if raw := r.URL.Query().Get("parent_id"); raw != "" {
 		id, err := strconv.ParseInt(raw, 10, 64)
@@ -64,24 +64,24 @@ func (h *LocationsHandler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		parentID = &id
 	}
-	locations, err := h.q.GetLocationsByParent(r.Context(), parentID)
+	storages, err := h.q.GetStoragesByParent(r.Context(), parentID)
 	if err != nil {
 		serverError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toLocationDTOs(locations))
+	writeJSON(w, http.StatusOK, toStorageDTOs(storages))
 }
 
-// GET /api/locations/:id
-func (h *LocationsHandler) get(w http.ResponseWriter, r *http.Request) {
+// GET /api/storages/:id
+func (h *StoragesHandler) get(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	location, err := h.q.GetLocationByID(r.Context(), id)
+	storage, err := h.q.GetStorageByID(r.Context(), id)
 	if isNoRows(err) {
-		notFound(w, "location")
+		notFound(w, "storage")
 		return
 	}
 	if err != nil {
@@ -94,21 +94,21 @@ func (h *LocationsHandler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"location":   toLocationDTO(location),
+		"storage":    toStorageDTO(storage),
 		"breadcrumb": breadcrumb,
 	})
 }
 
-// GET /api/locations/:id/contents — recursive: everything under it (§3).
-func (h *LocationsHandler) contents(w http.ResponseWriter, r *http.Request) {
+// GET /api/storages/:id/contents — recursive: everything under it (§3).
+func (h *StoragesHandler) contents(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	location, err := h.q.GetLocationByID(r.Context(), id)
+	storage, err := h.q.GetStorageByID(r.Context(), id)
 	if isNoRows(err) {
-		notFound(w, "location")
+		notFound(w, "storage")
 		return
 	}
 	if err != nil {
@@ -120,12 +120,12 @@ func (h *LocationsHandler) contents(w http.ResponseWriter, r *http.Request) {
 		serverError(w, r, err)
 		return
 	}
-	descendantIDs, err := h.q.DescendantLocationIDs(r.Context(), id)
+	descendantIDs, err := h.q.DescendantStorageIDs(r.Context(), id)
 	if err != nil {
 		serverError(w, r, err)
 		return
 	}
-	rows, err := h.q.ListItemsByLocationIDs(r.Context(), descendantIDs)
+	rows, err := h.q.ListItemsByStorageIDs(r.Context(), descendantIDs)
 	if err != nil {
 		serverError(w, r, err)
 		return
@@ -135,13 +135,13 @@ func (h *LocationsHandler) contents(w http.ResponseWriter, r *http.Request) {
 		items[i] = toItemDTOFromContentsRow(row)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"location":   toLocationDTO(location),
+		"storage":    toStorageDTO(storage),
 		"breadcrumb": breadcrumb,
 		"items":      items,
 	})
 }
 
-type createLocationRequest struct {
+type createStorageRequest struct {
 	Name     string  `json:"name"`
 	ParentID *int64  `json:"parent_id"`
 	QrToken  *string `json:"qr_token"`
@@ -150,9 +150,9 @@ type createLocationRequest struct {
 	IsShared *bool   `json:"is_shared"`
 }
 
-// POST /api/locations
-func (h *LocationsHandler) create(w http.ResponseWriter, r *http.Request) {
-	var req createLocationRequest
+// POST /api/storages
+func (h *StoragesHandler) create(w http.ResponseWriter, r *http.Request) {
+	var req createStorageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -161,21 +161,21 @@ func (h *LocationsHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	// Mirrors ItemsHandler.create's LocationExists pre-check for location_id
+	// Mirrors ItemsHandler.create's StorageExists pre-check for storage_id
 	// — without it, a nonexistent parent_id fell through to a raw FK
 	// violation (23503) and a generic 500 instead of a clean 422, unlike
 	// items, which already pre-checks. Same "check first" reasoning as
-	// items: a location doesn't get deleted out from under a create request
+	// items: a storage doesn't get deleted out from under a create request
 	// often enough for the pgConflict-style "let the DB constraint be the
 	// race-free source of truth" argument to outweigh a clean error here.
 	if req.ParentID != nil {
-		exists, err := h.q.LocationExists(r.Context(), *req.ParentID)
+		exists, err := h.q.StorageExists(r.Context(), *req.ParentID)
 		if err != nil {
 			serverError(w, r, err)
 			return
 		}
 		if !exists {
-			writeError(w, http.StatusUnprocessableEntity, "parent location does not exist")
+			writeError(w, http.StatusUnprocessableEntity, "parent storage does not exist")
 			return
 		}
 	}
@@ -193,7 +193,7 @@ func (h *LocationsHandler) create(w http.ResponseWriter, r *http.Request) {
 	//
 	// An explicit qr_token: "" is treated the same as an absent one (still
 	// auto-generated) — not as "the caller provided the empty string as
-	// their token". Without this, "" occupies locations.qr_token's unique
+	// their token". Without this, "" occupies storages.qr_token's unique
 	// slot, and the next caller that omits qr_token entirely gets a
 	// confusing `qr_token "" already in use` 409 instead of a fresh
 	// generated code.
@@ -203,13 +203,13 @@ func (h *LocationsHandler) create(w http.ResponseWriter, r *http.Request) {
 		qrToken = *req.QrToken
 	}
 
-	var location store.Location
+	var storage store.Storage
 	var err error
 	for attempt := 0; ; attempt++ {
 		if autoGenerated {
 			qrToken = codegen.PlainTextCode()
 		}
-		location, err = h.q.InsertLocation(r.Context(), store.InsertLocationParams{
+		storage, err = h.q.InsertStorage(r.Context(), store.InsertStorageParams{
 			ParentID: req.ParentID,
 			OwnerID:  nil, // no auth yet (Phase 3 step 5) — every row is ownerless until then
 			IsShared: isShared,
@@ -230,16 +230,16 @@ func (h *LocationsHandler) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, http.StatusCreated, toLocationDTO(location))
+	writeJSON(w, http.StatusCreated, toStorageDTO(storage))
 }
 
-// PATCH /api/locations/:id — rename, move, edit code, toggle is_shared (§9).
+// PATCH /api/storages/:id — rename, move, edit code, toggle is_shared (§9).
 // Hand-written rather than sqlc-generated: any subset of columns may be
-// present, and a provided `parent_id: null` (make this a root location) must
+// present, and a provided `parent_id: null` (make this a root storage) must
 // be distinguishable from an absent parent_id (leave unchanged) — a
 // COALESCE-based static query can't tell those apart, so this builds the SET
 // clause from whichever keys actually appear in the JSON body.
-func (h *LocationsHandler) update(w http.ResponseWriter, r *http.Request) {
+func (h *StoragesHandler) update(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -263,7 +263,7 @@ func (h *LocationsHandler) update(w http.ResponseWriter, r *http.Request) {
 			}
 			// Mirrors create's strings.TrimSpace(req.Name) == "" check — that
 			// check only ever lived on create, so PATCH could blank out an
-			// existing location's name entirely.
+			// existing storage's name entirely.
 			if strings.TrimSpace(v) == "" {
 				writeError(w, http.StatusBadRequest, "name is required")
 				return
@@ -312,7 +312,7 @@ func (h *LocationsHandler) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if token, ok := set["qr_token"].(string); ok {
-		inUse, err := h.q.LocationQRTokenInUse(r.Context(), store.LocationQRTokenInUseParams{QrToken: token, ID: id})
+		inUse, err := h.q.StorageQRTokenInUse(r.Context(), store.StorageQRTokenInUseParams{QrToken: token, ID: id})
 		if err != nil {
 			serverError(w, r, err)
 			return
@@ -323,42 +323,42 @@ func (h *LocationsHandler) update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// A new parent that is this location itself, or one of its own
+	// A new parent that is this storage itself, or one of its own
 	// descendants, would create a cycle — the FK alone doesn't prevent this,
-	// and LocationBreadcrumb/DescendantLocationIDs are unbounded recursive
+	// and StorageBreadcrumb/DescendantStorageIDs are unbounded recursive
 	// CTEs that would then never terminate for anything touching the
-	// resulting loop (item/location detail, the dashboard feed, search, and
-	// every MCP tool that resolves a location). DescendantLocationIDs(id)
+	// resulting loop (item/storage detail, the dashboard feed, search, and
+	// every MCP tool that resolves a storage). DescendantStorageIDs(id)
 	// already includes id itself, so membership in that set is exactly the
 	// "would cycle" condition, with no extra query needed.
 	if newParentID, ok := set["parent_id"].(*int64); ok && newParentID != nil {
-		// Mirrors create's LocationExists pre-check — without it, a
+		// Mirrors create's StorageExists pre-check — without it, a
 		// nonexistent parent_id fell through to a raw FK violation (23503)
 		// and a generic 500 instead of a clean 422.
-		exists, err := h.q.LocationExists(r.Context(), *newParentID)
+		exists, err := h.q.StorageExists(r.Context(), *newParentID)
 		if err != nil {
 			serverError(w, r, err)
 			return
 		}
 		if !exists {
-			writeError(w, http.StatusUnprocessableEntity, "parent location does not exist")
+			writeError(w, http.StatusUnprocessableEntity, "parent storage does not exist")
 			return
 		}
 
-		descendantIDs, err := h.q.DescendantLocationIDs(r.Context(), id)
+		descendantIDs, err := h.q.DescendantStorageIDs(r.Context(), id)
 		if err != nil {
 			serverError(w, r, err)
 			return
 		}
 		for _, d := range descendantIDs {
 			if d == *newParentID {
-				writeError(w, http.StatusConflict, "parent_id would create a cycle (it is this location or one of its own descendants)")
+				writeError(w, http.StatusConflict, "parent_id would create a cycle (it is this storage or one of its own descendants)")
 				return
 			}
 		}
 	}
 
-	query, args := buildUpdateQuery("locations", id, set)
+	query, args := buildUpdateQuery("storages", id, set)
 	if _, err := h.pool.Exec(r.Context(), query, args...); err != nil {
 		if pgConflict(err) {
 			writeError(w, http.StatusConflict, "qr_token already in use")
@@ -368,55 +368,55 @@ func (h *LocationsHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	location, err := h.q.GetLocationByID(r.Context(), id)
+	storage, err := h.q.GetStorageByID(r.Context(), id)
 	if isNoRows(err) {
-		notFound(w, "location")
+		notFound(w, "storage")
 		return
 	}
 	if err != nil {
 		serverError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toLocationDTO(location))
+	writeJSON(w, http.StatusOK, toStorageDTO(storage))
 }
 
-// DELETE /api/locations/:id?force= (§3). Child locations always become
+// DELETE /api/storages/:id?force= (§3). Child storages always become
 // root-level automatically (the FK's ON DELETE SET NULL fires as part of the
 // DELETE below) — never blocked, never forced. The only case requiring
-// force=true is a root location that still directly holds items: nowhere to
+// force=true is a root storage that still directly holds items: nowhere to
 // promote them to.
 //
 // Runs as one transaction: promoting (or force-deleting) the direct items
-// and then deleting the location are two-to-three separate statements, and
-// the force branch is destructive — if DeleteLocation failed after
-// DeleteItemsAtLocation had already committed, those items would be gone
-// for good with the location they were deleted from still sitting there.
+// and then deleting the storage are two-to-three separate statements, and
+// the force branch is destructive — if DeleteStorage failed after
+// DeleteItemsAtStorage had already committed, those items would be gone
+// for good with the storage they were deleted from still sitting there.
 //
-// The item-clearing step (CountDirectItemsAtLocation+maybe DeleteItemsAtLocation
-// for a root location, PromoteItemsToParent for a non-root one) happens
+// The item-clearing step (CountDirectItemsAtStorage+maybe DeleteItemsAtStorage
+// for a root storage, PromoteItemsToParent for a non-root one) happens
 // inside this transaction, but under Postgres's default READ COMMITTED
 // isolation that only guarantees each statement its own up-to-date
 // snapshot, not a snapshot frozen for the whole transaction — it does NOT
 // close the race a stronger isolation level would, and the hazard is the
 // same in both branches: a direct item concurrently inserted into this
-// location right after its item-clearing statement runs (and commits
-// elsewhere) but before this transaction's later DeleteLocation statement
-// is still there when DeleteLocation runs, and items.location_id is ON
-// DELETE RESTRICT (migrations/000001_init.up.sql), so DeleteLocation fails
+// storage right after its item-clearing statement runs (and commits
+// elsewhere) but before this transaction's later DeleteStorage statement
+// is still there when DeleteStorage runs, and items.storage_id is ON
+// DELETE RESTRICT (migrations/000001_init.up.sql), so DeleteStorage fails
 // outright. Verified empirically with two concurrent psql sessions on both
-// branches: a location correctly counted/promoted as having no direct
-// items still ends up failing DeleteLocation with a raw 23503
+// branches: a storage correctly counted/promoted as having no direct
+// items still ends up failing DeleteStorage with a raw 23503
 // (foreign-key-violation) once a concurrent insert lands in the gap. No
 // data corruption either way: the FK's RESTRICT is what stops it, rolling
 // the whole transaction back rather than leaving the concurrently-inserted
-// item pointing at a location that got deleted anyway. Worst case is a
+// item pointing at a storage that got deleted anyway. Worst case is a
 // request that should have cleanly 409'd (root) or actually succeeded
 // against the pre-race state (non-root) failing loudly with an uncaught
 // 500 instead of a retry-worthy error — so this is flagged rather than
 // fixed with a stronger isolation level or an explicit row lock; SERIALIZABLE (or
-// SELECT ... FOR UPDATE on the location row) would close it if this ever
+// SELECT ... FOR UPDATE on the storage row) would close it if this ever
 // becomes a real problem in practice.
-func (h *LocationsHandler) delete(w http.ResponseWriter, r *http.Request) {
+func (h *StoragesHandler) delete(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDParam(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
@@ -430,34 +430,34 @@ func (h *LocationsHandler) delete(w http.ResponseWriter, r *http.Request) {
 	err = withTx(r.Context(), h.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 
-		location, err := q.GetLocationByID(r.Context(), id)
+		storage, err := q.GetStorageByID(r.Context(), id)
 		if isNoRows(err) {
-			status, message = http.StatusNotFound, "location not found"
+			status, message = http.StatusNotFound, "storage not found"
 			return errHandled
 		}
 		if err != nil {
 			return err
 		}
 
-		if location.ParentID != nil {
+		if storage.ParentID != nil {
 			if err := q.PromoteItemsToParent(r.Context(), store.PromoteItemsToParentParams{
-				NewLocationID: *location.ParentID,
-				OldLocationID: id,
+				NewStorageID: *storage.ParentID,
+				OldStorageID: id,
 			}); err != nil {
 				return err
 			}
 		} else {
-			count, err := q.CountDirectItemsAtLocation(r.Context(), id)
+			count, err := q.CountDirectItemsAtStorage(r.Context(), id)
 			if err != nil {
 				return err
 			}
 			if count > 0 {
 				if !force {
 					status, message = http.StatusConflict,
-						"location holds items directly and has no parent to promote them to — retry with force=true"
+						"storage holds items directly and has no parent to promote them to — retry with force=true"
 					return errHandled
 				}
-				if err := q.DeleteItemsAtLocation(r.Context(), id); err != nil {
+				if err := q.DeleteItemsAtStorage(r.Context(), id); err != nil {
 					return err
 				}
 			}
@@ -465,8 +465,8 @@ func (h *LocationsHandler) delete(w http.ResponseWriter, r *http.Request) {
 
 		// Same transaction as the promote-or-delete-items branch above — if
 		// this fails, the items move/delete above rolls back with it instead
-		// of being left committed with the location still sitting there.
-		return q.DeleteLocation(r.Context(), id)
+		// of being left committed with the storage still sitting there.
+		return q.DeleteStorage(r.Context(), id)
 	})
 
 	if errors.Is(err, errHandled) {

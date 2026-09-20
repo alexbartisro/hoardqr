@@ -1,10 +1,10 @@
 <script lang="ts">
-	// Shared location-resolution component (architecture plan §7), reused by the Add
+	// Shared storage-resolution component (architecture plan §7), reused by the Add
 	// Object / Add Storage flows (Phase 2 step 4) and later /scan. Three input paths,
-	// one rule: if what's identified is an item, use its location; if it's a location,
+	// one rule: if what's identified is an item, use its storage; if it's a storage,
 	// use it directly. Only the final "look this code up" call is mocked — camera
 	// scanning (html5-qrcode) and OCR (Tesseract.js) are real, client-side, right now.
-	import { getLocation, resolveLocation, searchSuggest } from '$lib/api';
+	import { getStorage, resolveStorage, searchSuggest } from '$lib/api';
 	import type { Item, SearchSuggestion } from '$lib/types';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -12,12 +12,12 @@
 	import QrScanner from '$lib/components/qr-scanner.svelte';
 
 	let {
-		locationId = $bindable<number | null>(null),
+		storageId = $bindable<number | null>(null),
 		breadcrumb = $bindable<string>(''),
 		optional = false
-	}: { locationId?: number | null; breadcrumb?: string; optional?: boolean } = $props();
+	}: { storageId?: number | null; breadcrumb?: string; optional?: boolean } = $props();
 
-	// `locationId === null` is ambiguous on its own — "not chosen yet" and "no
+	// `storageId === null` is ambiguous on its own — "not chosen yet" and "no
 	// parent, by choice" (Add Storage's root-level case, §8) are different states
 	// that need different UI. This tracks the latter explicitly.
 	let skipped = $state(false);
@@ -69,8 +69,8 @@
 	});
 
 	async function resolveTo(id: number) {
-		const { location, breadcrumb: path } = await getLocation(id);
-		locationId = location.id;
+		const { storage, breadcrumb: path } = await getStorage(id);
+		storageId = storage.id;
 		breadcrumb = path.map((p) => p.name).join(' > ');
 		resolveError = null;
 		pickerItems = null;
@@ -78,7 +78,7 @@
 	}
 
 	async function selectSuggestion(s: SearchSuggestion) {
-		const id = s.kind === 'item' ? s.location_id! : s.id;
+		const id = s.kind === 'item' ? s.storage_id! : s.id;
 		await resolveTo(id);
 		suggestions = [];
 		query = '';
@@ -87,18 +87,18 @@
 	async function handleResolvedCode(code: string) {
 		resolveError = null;
 		pickerItems = null;
-		const result = await resolveLocation(code);
-		if (result.kind === 'location') {
-			await resolveTo(result.location_id);
+		const result = await resolveStorage(code);
+		if (result.kind === 'storage') {
+			await resolveTo(result.storage_id);
 		} else if (result.kind === 'items') {
 			pickerItems = result.items; // several items share this code — let the user pick
 		} else {
-			resolveError = `No item or location uses code "${code}".`;
+			resolveError = `No item or storage uses code "${code}".`;
 		}
 	}
 
 	async function choosePickerItem(item: Item) {
-		await resolveTo(item.location_id);
+		await resolveTo(item.storage_id);
 	}
 
 	async function startOcrCamera() {
@@ -171,14 +171,14 @@
 </script>
 
 <div class="flex flex-col gap-3">
-	{#if locationId != null}
+	{#if storageId != null}
 		<div class="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
 			<span>{breadcrumb}</span>
 			<Button
 				variant="ghost"
 				size="sm"
 				onclick={() => {
-					locationId = null;
+					storageId = null;
 					breadcrumb = '';
 				}}
 			>

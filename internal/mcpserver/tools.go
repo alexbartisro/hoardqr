@@ -18,32 +18,32 @@ func registerTools(s *mcp.Server, pool *pgxpool.Pool) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "find_items",
-		Description: "Search for items by name, tag, or code. Returns each match with the location it's stored in.",
+		Description: "Search for items by name, tag, or code. Returns each match with the storage it's stored in.",
 	}, findItemsHandler(q))
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "where_is",
-		Description: "Resolve an item's name to the full location path it's stored in.",
+		Description: "Resolve an item's name to the full storage path it's stored in.",
 	}, whereIsHandler(q))
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_contents",
-		Description: "List everything stored in a location, including everything nested inside its child locations.",
+		Description: "List everything stored in a storage, including everything nested inside its child storages.",
 	}, listContentsHandler(q))
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "add_item",
-		Description: "Catalog a new object and place it in a location.",
+		Description: "Catalog a new object and place it in a storage.",
 	}, addItemHandler(q))
 
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "add_location",
-		Description: "Create a new storage location (a box, shelf, cabinet, room, etc.), optionally nested inside an existing one.",
-	}, addLocationHandler(q))
+		Name:        "add_storage",
+		Description: "Create a new storage container (a box, shelf, cabinet, room, etc.), optionally nested inside an existing one.",
+	}, addStorageHandler(q))
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "move_item",
-		Description: "Move an existing item to a different location.",
+		Description: "Move an existing item to a different storage.",
 	}, moveItemHandler(pool))
 }
 
@@ -54,9 +54,9 @@ type findItemsInput struct {
 }
 
 type foundItem struct {
-	ID       int64  `json:"id"`
-	Name     string `json:"name"`
-	Location string `json:"location" jsonschema:"breadcrumb path from root to where this item lives"`
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	Storage string `json:"storage" jsonschema:"breadcrumb path from root to where this item lives"`
 }
 
 type findItemsOutput struct {
@@ -66,7 +66,7 @@ type findItemsOutput struct {
 func findItemsHandler(q *store.Queries) mcp.ToolHandlerFor[findItemsInput, findItemsOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in findItemsInput) (*mcp.CallToolResult, findItemsOutput, error) {
 		// Trimmed, like the REST search handler (internal/api/search.go's
-		// Suggest) and resolveLocation/resolveItem — untrimmed, a leading or
+		// Suggest) and resolveStorage/resolveItem — untrimmed, a leading or
 		// trailing space (e.g. an LLM relaying a user's pasted code verbatim)
 		// breaks the exact-code match branch and finds nothing, the same class
 		// of bug already found and fixed once for the REST endpoint. An empty
@@ -80,7 +80,7 @@ func findItemsHandler(q *store.Queries) mcp.ToolHandlerFor[findItemsInput, findI
 		}
 
 		// SearchSuggestByKind, not SearchSuggest — a shared top-10 across
-		// kinds let a higher-scoring location/tag match crowd out real item
+		// kinds let a higher-scoring storage/tag match crowd out real item
 		// matches entirely (a query could come back empty despite a genuine
 		// match existing). Two separate calls, one per kind actually needed
 		// here, rather than one mixed query filtered in Go. See the Obsidian
@@ -92,14 +92,14 @@ func findItemsHandler(q *store.Queries) mcp.ToolHandlerFor[findItemsInput, findI
 			return nil, findItemsOutput{}, sanitizeToolError(ctx, "find_items", err)
 		}
 		for _, row := range itemRows {
-			if row.LocationID == nil {
+			if row.StorageID == nil {
 				continue
 			}
-			breadcrumb, err := breadcrumbText(ctx, q, *row.LocationID)
+			breadcrumb, err := breadcrumbText(ctx, q, *row.StorageID)
 			if err != nil {
 				return nil, findItemsOutput{}, sanitizeToolError(ctx, "find_items", err)
 			}
-			out.Items = append(out.Items, foundItem{ID: row.ID, Name: row.Name, Location: breadcrumb})
+			out.Items = append(out.Items, foundItem{ID: row.ID, Name: row.Name, Storage: breadcrumb})
 			seen[row.ID] = true
 		}
 
@@ -122,11 +122,11 @@ func findItemsHandler(q *store.Queries) mcp.ToolHandlerFor[findItemsInput, findI
 				if seen[item.ID] {
 					continue
 				}
-				breadcrumb, err := breadcrumbText(ctx, q, item.LocationID)
+				breadcrumb, err := breadcrumbText(ctx, q, item.StorageID)
 				if err != nil {
 					return nil, findItemsOutput{}, sanitizeToolError(ctx, "find_items", err)
 				}
-				out.Items = append(out.Items, foundItem{ID: item.ID, Name: item.Name, Location: breadcrumb})
+				out.Items = append(out.Items, foundItem{ID: item.ID, Name: item.Name, Storage: breadcrumb})
 				seen[item.ID] = true
 			}
 		}
@@ -142,28 +142,28 @@ type whereIsInput struct {
 }
 
 type whereIsOutput struct {
-	Item     string `json:"item" jsonschema:"the matched item's actual name"`
-	Location string `json:"location" jsonschema:"breadcrumb path from root to where it lives"`
+	Item    string `json:"item" jsonschema:"the matched item's actual name"`
+	Storage string `json:"storage" jsonschema:"breadcrumb path from root to where it lives"`
 }
 
 func whereIsHandler(q *store.Queries) mcp.ToolHandlerFor[whereIsInput, whereIsOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in whereIsInput) (*mcp.CallToolResult, whereIsOutput, error) {
-		_, matchedName, locationID, err := resolveItem(ctx, q, in.Name)
+		_, matchedName, storageID, err := resolveItem(ctx, q, in.Name)
 		if err != nil {
 			return nil, whereIsOutput{}, sanitizeToolError(ctx, "where_is", err)
 		}
-		breadcrumb, err := breadcrumbText(ctx, q, locationID)
+		breadcrumb, err := breadcrumbText(ctx, q, storageID)
 		if err != nil {
 			return nil, whereIsOutput{}, sanitizeToolError(ctx, "where_is", err)
 		}
-		return nil, whereIsOutput{Item: matchedName, Location: breadcrumb}, nil
+		return nil, whereIsOutput{Item: matchedName, Storage: breadcrumb}, nil
 	}
 }
 
 // --- list_contents ---
 
 type listContentsInput struct {
-	Location string `json:"location" jsonschema:"the location's name, or close to it"`
+	Storage string `json:"storage" jsonschema:"the storage's name, or close to it"`
 }
 
 type contentItem struct {
@@ -173,30 +173,30 @@ type contentItem struct {
 }
 
 type listContentsOutput struct {
-	Location string        `json:"location" jsonschema:"the matched location's actual name"`
-	Path     string        `json:"path" jsonschema:"breadcrumb path from root to this location"`
-	Items    []contentItem `json:"items" jsonschema:"every item stored here or in any location nested inside it"`
+	Storage string        `json:"storage" jsonschema:"the matched storage's actual name"`
+	Path    string        `json:"path" jsonschema:"breadcrumb path from root to this storage"`
+	Items   []contentItem `json:"items" jsonschema:"every item stored here or in any storage nested inside it"`
 }
 
 func listContentsHandler(q *store.Queries) mcp.ToolHandlerFor[listContentsInput, listContentsOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in listContentsInput) (*mcp.CallToolResult, listContentsOutput, error) {
-		locationID, matchedName, err := resolveLocation(ctx, q, in.Location)
+		storageID, matchedName, err := resolveStorage(ctx, q, in.Storage)
 		if err != nil {
 			return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
 		}
-		path, err := breadcrumbText(ctx, q, locationID)
+		path, err := breadcrumbText(ctx, q, storageID)
 		if err != nil {
 			return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
 		}
-		descendantIDs, err := q.DescendantLocationIDs(ctx, locationID)
+		descendantIDs, err := q.DescendantStorageIDs(ctx, storageID)
 		if err != nil {
 			return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
 		}
-		rows, err := q.ListItemsByLocationIDs(ctx, descendantIDs)
+		rows, err := q.ListItemsByStorageIDs(ctx, descendantIDs)
 		if err != nil {
 			return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
 		}
-		out := listContentsOutput{Location: matchedName, Path: path, Items: []contentItem{}}
+		out := listContentsOutput{Storage: matchedName, Path: path, Items: []contentItem{}}
 		for _, row := range rows {
 			out.Items = append(out.Items, contentItem{ID: row.ID, Name: row.Name, Quantity: row.Quantity})
 		}
@@ -208,15 +208,15 @@ func listContentsHandler(q *store.Queries) mcp.ToolHandlerFor[listContentsInput,
 
 type addItemInput struct {
 	Name     string `json:"name" jsonschema:"the object's name"`
-	Location string `json:"location" jsonschema:"where to store it — a location's name, or close to it"`
+	Storage  string `json:"storage" jsonschema:"where to store it — a storage's name, or close to it"`
 	Quantity *int32 `json:"quantity,omitempty" jsonschema:"how many; defaults to 1"`
 }
 
 type addItemOutput struct {
-	ID       int64  `json:"id"`
-	Name     string `json:"name"`
-	Location string `json:"location" jsonschema:"the matched location's actual name"`
-	Code     string `json:"code" jsonschema:"the generated code, printable on a label for this item"`
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	Storage string `json:"storage" jsonschema:"the matched storage's actual name"`
+	Code    string `json:"code" jsonschema:"the generated code, printable on a label for this item"`
 }
 
 func addItemHandler(q *store.Queries) mcp.ToolHandlerFor[addItemInput, addItemOutput] {
@@ -228,7 +228,7 @@ func addItemHandler(q *store.Queries) mcp.ToolHandlerFor[addItemInput, addItemOu
 		if name == "" {
 			return nil, addItemOutput{}, toolErrorf("name is required")
 		}
-		locationID, matchedLocation, err := resolveLocation(ctx, q, in.Location)
+		storageID, matchedStorage, err := resolveStorage(ctx, q, in.Storage)
 		if err != nil {
 			return nil, addItemOutput{}, sanitizeToolError(ctx, "add_item", err)
 		}
@@ -238,7 +238,7 @@ func addItemHandler(q *store.Queries) mcp.ToolHandlerFor[addItemInput, addItemOu
 		}
 		code := codegen.PlainTextCode()
 		item, err := q.InsertItem(ctx, store.InsertItemParams{
-			LocationID:   locationID,
+			StorageID:    storageID,
 			IsShared:     true, // no auth yet — every row is public until then (see CLAUDE.md)
 			Name:         name,
 			Quantity:     quantity,
@@ -248,50 +248,50 @@ func addItemHandler(q *store.Queries) mcp.ToolHandlerFor[addItemInput, addItemOu
 		if err != nil {
 			return nil, addItemOutput{}, sanitizeToolError(ctx, "add_item", err)
 		}
-		return nil, addItemOutput{ID: item.ID, Name: item.Name, Location: matchedLocation, Code: item.QrToken}, nil
+		return nil, addItemOutput{ID: item.ID, Name: item.Name, Storage: matchedStorage, Code: item.QrToken}, nil
 	}
 }
 
-// --- add_location ---
+// --- add_storage ---
 
-type addLocationInput struct {
-	Name   string  `json:"name" jsonschema:"the new location's name"`
-	Parent *string `json:"parent,omitempty" jsonschema:"an existing location to nest this inside; omit for a root-level location"`
+type addStorageInput struct {
+	Name   string  `json:"name" jsonschema:"the new storage's name"`
+	Parent *string `json:"parent,omitempty" jsonschema:"an existing storage to nest this inside; omit for a root-level storage"`
 }
 
-type addLocationOutput struct {
+type addStorageOutput struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
-	Path string `json:"path" jsonschema:"breadcrumb path from root, including the new location itself"`
-	Code string `json:"code" jsonschema:"the generated code, printable on a label for this location"`
+	Path string `json:"path" jsonschema:"breadcrumb path from root, including the new storage itself"`
+	Code string `json:"code" jsonschema:"the generated code, printable on a label for this storage"`
 }
 
-func addLocationHandler(q *store.Queries) mcp.ToolHandlerFor[addLocationInput, addLocationOutput] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in addLocationInput) (*mcp.CallToolResult, addLocationOutput, error) {
-		// Mirrors internal/api/locations.go's create handler's own
+func addStorageHandler(q *store.Queries) mcp.ToolHandlerFor[addStorageInput, addStorageOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in addStorageInput) (*mcp.CallToolResult, addStorageOutput, error) {
+		// Mirrors internal/api/storages.go's create handler's own
 		// strings.TrimSpace(req.Name) == "" check — REST rejects a blank name,
 		// so an MCP caller shouldn't be able to create one either.
 		name := strings.TrimSpace(in.Name)
 		if name == "" {
-			return nil, addLocationOutput{}, toolErrorf("name is required")
+			return nil, addStorageOutput{}, toolErrorf("name is required")
 		}
 
 		var parentID *int64
 		if in.Parent != nil {
-			id, _, err := resolveLocation(ctx, q, *in.Parent)
+			id, _, err := resolveStorage(ctx, q, *in.Parent)
 			if err != nil {
-				return nil, addLocationOutput{}, sanitizeToolError(ctx, "add_location", err)
+				return nil, addStorageOutput{}, sanitizeToolError(ctx, "add_storage", err)
 			}
 			parentID = &id
 		}
 
 		// Retries on a generated-code collision (architecture plan §4: "a
 		// non-event, not something to design around") — same reasoning as
-		// internal/api/locations.go's create handler.
-		var location store.Location
+		// internal/api/storages.go's create handler.
+		var storage store.Storage
 		for attempt := 0; ; attempt++ {
 			var err error
-			location, err = q.InsertLocation(ctx, store.InsertLocationParams{
+			storage, err = q.InsertStorage(ctx, store.InsertStorageParams{
 				ParentID: parentID,
 				IsShared: true, // no auth yet — every row is public until then (see CLAUDE.md)
 				Name:     name,
@@ -301,68 +301,68 @@ func addLocationHandler(q *store.Queries) mcp.ToolHandlerFor[addLocationInput, a
 				break
 			}
 			if !isConflict(err) || attempt >= 5 {
-				return nil, addLocationOutput{}, sanitizeToolError(ctx, "add_location", err)
+				return nil, addStorageOutput{}, sanitizeToolError(ctx, "add_storage", err)
 			}
 		}
 
-		path, err := breadcrumbText(ctx, q, location.ID)
+		path, err := breadcrumbText(ctx, q, storage.ID)
 		if err != nil {
-			return nil, addLocationOutput{}, sanitizeToolError(ctx, "add_location", err)
+			return nil, addStorageOutput{}, sanitizeToolError(ctx, "add_storage", err)
 		}
-		return nil, addLocationOutput{ID: location.ID, Name: location.Name, Path: path, Code: location.QrToken}, nil
+		return nil, addStorageOutput{ID: storage.ID, Name: storage.Name, Path: path, Code: storage.QrToken}, nil
 	}
 }
 
 // --- move_item ---
 
 type moveItemInput struct {
-	Item        string `json:"item" jsonschema:"the item's name, or close to it"`
-	NewLocation string `json:"new_location" jsonschema:"where to move it — a location's name, or close to it"`
+	Item       string `json:"item" jsonschema:"the item's name, or close to it"`
+	NewStorage string `json:"new_storage" jsonschema:"where to move it — a storage's name, or close to it"`
 }
 
 type moveItemOutput struct {
-	Item         string `json:"item" jsonschema:"the matched item's actual name"`
-	FromLocation string `json:"from_location"`
-	ToLocation   string `json:"to_location"`
+	Item        string `json:"item" jsonschema:"the matched item's actual name"`
+	FromStorage string `json:"from_storage"`
+	ToStorage   string `json:"to_storage"`
 }
 
 // auditDetails is the shape written to audit_log.details for a move_item
 // call — just enough to reconstruct what happened without re-deriving it
 // from other tables later.
 type auditDetails struct {
-	FromLocationID int64 `json:"from_location_id"`
-	ToLocationID   int64 `json:"to_location_id"`
+	FromStorageID int64 `json:"from_storage_id"`
+	ToStorageID   int64 `json:"to_storage_id"`
 }
 
 func moveItemHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[moveItemInput, moveItemOutput] {
 	// A read-only lookup pass (bound to the pool, not a transaction) resolves
-	// both names first — resolveItem/resolveLocation errors should surface
+	// both names first — resolveItem/resolveStorage errors should surface
 	// as plain "not found" tool errors, not a rolled-back transaction's
 	// generic failure.
 	q := store.New(pool)
 
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in moveItemInput) (*mcp.CallToolResult, moveItemOutput, error) {
-		itemID, matchedItem, fromLocationID, err := resolveItem(ctx, q, in.Item)
+		itemID, matchedItem, fromStorageID, err := resolveItem(ctx, q, in.Item)
 		if err != nil {
 			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
-		toLocationID, matchedToLocation, err := resolveLocation(ctx, q, in.NewLocation)
+		toStorageID, matchedToStorage, err := resolveStorage(ctx, q, in.NewStorage)
 		if err != nil {
 			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
-		fromBreadcrumb, err := breadcrumbText(ctx, q, fromLocationID)
+		fromBreadcrumb, err := breadcrumbText(ctx, q, fromStorageID)
 		if err != nil {
 			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
 
-		details, err := json.Marshal(auditDetails{FromLocationID: fromLocationID, ToLocationID: toLocationID})
+		details, err := json.Marshal(auditDetails{FromStorageID: fromStorageID, ToStorageID: toStorageID})
 		if err != nil {
 			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
 
 		// The reassignment and its audit trail commit or fail together —
 		// otherwise a failure between the two either loses the move or
-		// records a move that never happened. UpdateItemLocation's affected
+		// records a move that never happened. UpdateItemStorage's affected
 		// row count also guards a TOCTOU: resolveItem ran on the pool, before
 		// this transaction started, so a concurrent delete of the item in
 		// between would otherwise make the UPDATE a silent no-op — 0 rows
@@ -371,8 +371,8 @@ func moveItemHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[moveItemInput, moveI
 		// that never happened.
 		err = withTx(ctx, pool, func(tx pgx.Tx) error {
 			txq := store.New(tx)
-			rows, err := txq.UpdateItemLocation(ctx, store.UpdateItemLocationParams{
-				ID: itemID, LocationID: toLocationID,
+			rows, err := txq.UpdateItemStorage(ctx, store.UpdateItemStorageParams{
+				ID: itemID, StorageID: toStorageID,
 			})
 			if err != nil {
 				return err
@@ -392,6 +392,6 @@ func moveItemHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[moveItemInput, moveI
 			return nil, moveItemOutput{}, sanitizeToolError(ctx, "move_item", err)
 		}
 
-		return nil, moveItemOutput{Item: matchedItem, FromLocation: fromBreadcrumb, ToLocation: matchedToLocation}, nil
+		return nil, moveItemOutput{Item: matchedItem, FromStorage: fromBreadcrumb, ToStorage: matchedToStorage}, nil
 	}
 }

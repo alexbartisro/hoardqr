@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { getLocation } from '$lib/api';
-	import type { Location } from '$lib/types';
+	import { getStorage } from '$lib/api';
+	import type { Storage } from '$lib/types';
 	import LabelSheet from '$lib/components/label-sheet.svelte';
 	import { Button } from '$lib/components/ui/button';
 
-	let location = $state<Location | null>(null);
+	let storage = $state<Storage | null>(null);
 	let loadError = $state<string | null>(null);
 
 	// See CLAUDE.md's note on this pattern.
@@ -13,14 +13,14 @@
 	$effect(() => {
 		const id = Number(page.params.id);
 		const seq = ++loadSeq;
-		location = null;
+		storage = null;
 		loadError = null;
-		getLocation(id)
+		getStorage(id)
 			.then((r) => {
-				if (seq === loadSeq) location = r.location;
+				if (seq === loadSeq) storage = r.storage;
 			})
 			.catch((e) => {
-				if (seq === loadSeq) loadError = e instanceof Error ? e.message : 'Failed to load location.';
+				if (seq === loadSeq) loadError = e instanceof Error ? e.message : 'Failed to load storage.';
 			});
 	});
 </script>
@@ -30,10 +30,10 @@
 
 	{#if loadError}
 		<p class="text-destructive text-sm">{loadError}</p>
-	{:else if !location}
+	{:else if !storage}
 		<p class="text-muted-foreground text-sm print:hidden">Loading…</p>
 	{:else}
-		<LabelSheet name={location.name} qrToken={location.qr_token} />
+		<LabelSheet name={storage.name} qrToken={storage.qr_token} />
 		<Button onclick={() => window.print()} class="print:hidden">Print</Button>
 	{/if}
 </div>

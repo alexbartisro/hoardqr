@@ -21,7 +21,7 @@
 
 	// Set by /scan when this page is the result of scanning the item's own code
 	// (feedback 2026-09-17): scanning a physical object is someone asking "where
-	// does this live", so that page leads with the destination location instead
+	// does this live", so that page leads with the destination storage instead
 	// of item details. $derived, not captured once — unlike items/new's
 	// scannedCode (which only ever navigates away after success), this route
 	// can be revisited in place for a different id without remounting (see the
@@ -30,7 +30,7 @@
 	let cameFromScan = $derived(page.url.searchParams.get('scanned') === '1');
 
 	// Guards against a slower response for a since-abandoned id winning over a
-	// faster one for the current id — same pattern as location-picker.svelte's
+	// faster one for the current id — same pattern as storage-picker.svelte's
 	// search debounce, needed anywhere an $effect kicks off a fetch keyed by a
 	// value that can change again before that fetch resolves.
 	let loadSeq = 0;
@@ -113,7 +113,7 @@
 		deleting = true;
 		try {
 			await deleteItem(item.id);
-			await goto(`/locations/${item.location_id}`);
+			await goto(`/storages/${item.storage_id}`);
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Failed to delete item.';
 			deleting = false;
@@ -141,17 +141,17 @@
 						</p>
 					{/if}
 					<a
-						href="/locations/{item.location_id}"
+						href="/storages/{item.storage_id}"
 						class="text-primary mt-1 self-start text-sm underline-offset-2 hover:underline"
 					>
-						View location →
+						View storage →
 					</a>
 				</Card.Content>
 			</Card.Root>
 		{:else}
 			<div class="flex flex-wrap items-center gap-1 text-sm">
 				{#each breadcrumb as b, i (b.id)}
-					<a href="/locations/{b.id}" class="hover:underline">{b.name}</a>
+					<a href="/storages/{b.id}" class="hover:underline">{b.name}</a>
 					{#if i < breadcrumb.length - 1}<span class="text-muted-foreground">›</span>{/if}
 				{/each}
 			</div>

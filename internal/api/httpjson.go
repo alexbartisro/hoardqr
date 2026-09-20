@@ -50,7 +50,7 @@ func serverError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 // pgConflict reports whether err is a Postgres unique-violation (23505),
-// e.g. a duplicate locations.qr_token — the DB's own constraint is the
+// e.g. a duplicate storages.qr_token — the DB's own constraint is the
 // source of truth here, not a separate SELECT-then-INSERT check, which
 // would leave a race window between the check and the insert.
 func pgConflict(err error) bool {
@@ -58,7 +58,7 @@ func pgConflict(err error) bool {
 }
 
 // pgForeignKeyViolation reports whether err is a Postgres foreign-key
-// violation (23503) — used where a pre-check (like LocationExists) isn't
+// violation (23503) — used where a pre-check (like StorageExists) isn't
 // the shape of the fix, e.g. items.go's PATCH: by the time LinkItemTag
 // fires this, resolveTagIDs already succeeded, so the only FK left that
 // could still fail is item_tags.item_id referencing an item deleted

@@ -11,7 +11,7 @@ WHERE i.id = $1
 GROUP BY i.id;
 
 -- name: ListItems :many
--- location_id/q/tag are all optional filters (§9) — sqlc.narg + the
+-- storage_id/q/tag are all optional filters (§9) — sqlc.narg + the
 -- "IS NULL OR ..." pattern lets one static query cover every combination.
 -- q is LIKE-escaped the same way search.sql's SearchSuggest already is
 -- (backslash doubled first, then % and _ escaped, matched with ESCAPE '\')
@@ -26,7 +26,7 @@ SELECT i.*, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS N
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
-WHERE (sqlc.narg('location_id')::bigint IS NULL OR i.location_id = sqlc.narg('location_id'))
+WHERE (sqlc.narg('storage_id')::bigint IS NULL OR i.storage_id = sqlc.narg('storage_id'))
   AND (sqlc.narg('q')::text IS NULL OR i.name ILIKE '%' || (SELECT q_escaped FROM params) || '%' ESCAPE '\')
   AND (
     sqlc.narg('tag')::text IS NULL OR EXISTS (
@@ -38,14 +38,14 @@ WHERE (sqlc.narg('location_id')::bigint IS NULL OR i.location_id = sqlc.narg('lo
 GROUP BY i.id
 ORDER BY i.name;
 
--- name: ListItemsByLocationIDs :many
--- Backs GET /api/locations/:id/contents — location_ids is the recursive
--- descendant set from DescendantLocationIDs.
+-- name: ListItemsByStorageIDs :many
+-- Backs GET /api/storages/:id/contents — storage_ids is the recursive
+-- descendant set from DescendantStorageIDs.
 SELECT i.*, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
-WHERE i.location_id = ANY(sqlc.arg('location_ids')::bigint[])
+WHERE i.storage_id = ANY(sqlc.arg('storage_ids')::bigint[])
 GROUP BY i.id
 ORDER BY i.name;
 
@@ -70,19 +70,19 @@ SELECT count(*) FROM items;
 
 -- name: InsertItem :one
 INSERT INTO items (
-    location_id, owner_id, is_shared, name, description, quantity, condition,
+    storage_id, owner_id, is_shared, name, description, quantity, condition,
     qr_token, photo_url, purchase_date, purchase_price, receipt_url, custom_fields
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 RETURNING *;
 
 -- Item PATCH is hand-written in internal/api/items.go, same reasoning as
--- location PATCH — arbitrary subset of columns, nullable fields included.
+-- storage PATCH — arbitrary subset of columns, nullable fields included.
 
 -- name: DeleteItem :exec
 DELETE FROM items WHERE id = $1;
 
--- name: UpdateItemLocation :execrows
+-- name: UpdateItemStorage :execrows
 -- Backs the MCP move_item tool (§11) — a plain reassignment, paired with an
 -- InsertAuditLog call in the same handler (audit_log's first real writer;
 -- §3 defines the table but nothing has written to it before this tool).
@@ -91,7 +91,7 @@ DELETE FROM items WHERE id = $1;
 -- the pool, outside this transaction) and this UPDATE — without it, 0 rows
 -- affected still committed an audit_log "moved" row and reported success
 -- for a move that never happened.
-UPDATE items SET location_id = sqlc.arg(location_id)::bigint, updated_at = now()
+UPDATE items SET storage_id = sqlc.arg(storage_id)::bigint, updated_at = now()
 WHERE id = sqlc.arg(id)::bigint;
 
 -- name: ItemExists :one

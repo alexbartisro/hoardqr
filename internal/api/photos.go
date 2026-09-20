@@ -51,9 +51,9 @@ func (h *PhotosHandler) Routes(r chi.Router) {
 // the storage/serving shape in §12 but never designs the upload endpoint
 // itself). Accepts a single multipart "photo" field, stores it under a
 // random opaque filename (never the client's own filename), and returns the
-// URL to save as an item's or location's photo_url via the existing
+// URL to save as an item's or storage's photo_url via the existing
 // PATCH/POST routes — this endpoint only ever produces a URL, it doesn't
-// touch the items/locations tables itself.
+// touch the items/storages tables itself.
 func (h *PhotosHandler) upload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {

@@ -11,7 +11,7 @@
 // server's port so `npm run dev` works against a real local backend too.
 
 import { USERS } from './fixtures';
-import { ApiError, type Breadcrumb, type Item, type Location, type ResolveLocationResult, type ScanResult, type SearchSuggestion, type Tag, type User } from './types';
+import { ApiError, type Breadcrumb, type Item, type Storage, type ResolveStorageResult, type ScanResult, type SearchSuggestion, type Tag, type User } from './types';
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 	// A FormData body (photo upload) must NOT get a Content-Type set here —
@@ -46,43 +46,43 @@ function queryString(params: Record<string, string | number | boolean | undefine
 	return qs ? `?${qs}` : '';
 }
 
-// --- GET /api/locations?parent_id= ---
-export async function getLocations(parentId?: number | null): Promise<Location[]> {
-	return apiFetch(`/api/locations${queryString({ parent_id: parentId })}`);
+// --- GET /api/storages?parent_id= ---
+export async function getStorages(parentId?: number | null): Promise<Storage[]> {
+	return apiFetch(`/api/storages${queryString({ parent_id: parentId })}`);
 }
 
-// --- GET /api/locations/:id ---
-export async function getLocation(id: number): Promise<{ location: Location; breadcrumb: Breadcrumb }> {
-	return apiFetch(`/api/locations/${id}`);
+// --- GET /api/storages/:id ---
+export async function getStorage(id: number): Promise<{ storage: Storage; breadcrumb: Breadcrumb }> {
+	return apiFetch(`/api/storages/${id}`);
 }
 
-// --- GET /api/locations/:id/contents (recursive — §3) ---
-export async function getLocationContents(
+// --- GET /api/storages/:id/contents (recursive — §3) ---
+export async function getStorageContents(
 	id: number
-): Promise<{ location: Location; breadcrumb: Breadcrumb; items: Item[] }> {
-	return apiFetch(`/api/locations/${id}/contents`);
+): Promise<{ storage: Storage; breadcrumb: Breadcrumb; items: Item[] }> {
+	return apiFetch(`/api/storages/${id}/contents`);
 }
 
-// --- POST /api/locations ---
-export async function createLocation(
-	data: Pick<Location, 'name'> &
-		Partial<Pick<Location, 'parent_id' | 'qr_token' | 'photo_url' | 'notes' | 'is_shared'>>
-): Promise<Location> {
-	return apiFetch('/api/locations', { method: 'POST', body: JSON.stringify(data) });
+// --- POST /api/storages ---
+export async function createStorage(
+	data: Pick<Storage, 'name'> &
+		Partial<Pick<Storage, 'parent_id' | 'qr_token' | 'photo_url' | 'notes' | 'is_shared'>>
+): Promise<Storage> {
+	return apiFetch('/api/storages', { method: 'POST', body: JSON.stringify(data) });
 }
 
-// --- PATCH /api/locations/:id ---
-export async function updateLocation(id: number, patch: Partial<Location>): Promise<Location> {
-	return apiFetch(`/api/locations/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+// --- PATCH /api/storages/:id ---
+export async function updateStorage(id: number, patch: Partial<Storage>): Promise<Storage> {
+	return apiFetch(`/api/storages/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
 }
 
-// --- DELETE /api/locations/:id?force= (§3) ---
-export async function deleteLocation(id: number, opts: { force?: boolean } = {}): Promise<void> {
-	return apiFetch(`/api/locations/${id}${queryString({ force: opts.force })}`, { method: 'DELETE' });
+// --- DELETE /api/storages/:id?force= (§3) ---
+export async function deleteStorage(id: number, opts: { force?: boolean } = {}): Promise<void> {
+	return apiFetch(`/api/storages/${id}${queryString({ force: opts.force })}`, { method: 'DELETE' });
 }
 
-// --- GET /api/items?q=&tag=&location_id= ---
-export async function getItems(params: { q?: string; tag?: string; location_id?: number } = {}): Promise<Item[]> {
+// --- GET /api/items?q=&tag=&storage_id= ---
+export async function getItems(params: { q?: string; tag?: string; storage_id?: number } = {}): Promise<Item[]> {
 	return apiFetch(`/api/items${queryString(params)}`);
 }
 
@@ -112,7 +112,7 @@ export async function createTag(name: string): Promise<Tag> {
 // itself. Takes an already-client-compressed File/Blob (see
 // $lib/components/photo-upload.svelte, which runs browser-image-compression
 // before calling this) and returns the URL to set as an item's or
-// location's photo_url via the normal create/update calls — this endpoint
+// storage's photo_url via the normal create/update calls — this endpoint
 // never touches those tables itself. ---
 export async function uploadPhoto(file: Blob): Promise<{ photo_url: string }> {
 	const formData = new FormData();
@@ -127,7 +127,7 @@ export async function getItemById(id: number): Promise<{ item: Item; breadcrumb:
 
 // --- POST /api/items ---
 export async function createItem(
-	data: Pick<Item, 'name' | 'location_id'> &
+	data: Pick<Item, 'name' | 'storage_id'> &
 		Partial<
 			Pick<
 				Item,
@@ -173,9 +173,9 @@ export async function searchSuggest(query: string): Promise<SearchSuggestion[]> 
 	return apiFetch(`/api/search/suggest${queryString({ q: query })}`);
 }
 
-// --- GET /api/resolve-location?code= (§7) ---
-export async function resolveLocation(code: string): Promise<ResolveLocationResult> {
-	return apiFetch(`/api/resolve-location${queryString({ code })}`);
+// --- GET /api/resolve-storage?code= (§7) ---
+export async function resolveStorage(code: string): Promise<ResolveStorageResult> {
+	return apiFetch(`/api/resolve-storage${queryString({ code })}`);
 }
 
 // --- GET /api/users, POST /api/users, POST /api/login, /api/logout ---

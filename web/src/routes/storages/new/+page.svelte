@@ -1,13 +1,13 @@
 <script lang="ts">
-	// Add Storage flow (architecture plan §8): Location Picker here sets an optional
-	// parent (a root-level location like "Balcony" has none). A "generate vs. adopt
+	// Add Storage flow (architecture plan §8): Storage Picker here sets an optional
+	// parent (a root-level storage like "Balcony" has none). A "generate vs. adopt
 	// a barcode" code-assignment UI is deferred to editing after creation (label
 	// sheet, still to come) — the one exception is /scan's "no match — create here"
 	// outcome (§6), which passes an already-scanned code through via ?code=.
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { createLocation } from '$lib/api';
-	import LocationPicker from '$lib/components/location-picker.svelte';
+	import { createStorage } from '$lib/api';
+	import StoragePicker from '$lib/components/storage-picker.svelte';
 	import PhotoUpload from '$lib/components/photo-upload.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -33,7 +33,7 @@
 
 	function resetForm() {
 		// See the same reset in items/new — a second add in one session shouldn't
-		// start pre-filled with the previous location's data.
+		// start pre-filled with the previous storage's data.
 		parentId = null;
 		breadcrumb = '';
 		name = '';
@@ -45,7 +45,7 @@
 		submitting = true;
 		error = null;
 		try {
-			const created = await createLocation({
+			const created = await createStorage({
 				name: name.trim(),
 				parent_id: parentId,
 				photo_url: photoUrl,
@@ -54,12 +54,12 @@
 			resetForm();
 			if (safeReturnTo) {
 				const sep = safeReturnTo.includes('?') ? '&' : '?';
-				await goto(`${safeReturnTo}${sep}locationId=${created.id}`);
+				await goto(`${safeReturnTo}${sep}storageId=${created.id}`);
 			} else {
-				await goto(`/locations/${created.id}`);
+				await goto(`/storages/${created.id}`);
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to create location.';
+			error = e instanceof Error ? e.message : 'Failed to create storage.';
 		} finally {
 			submitting = false;
 		}
@@ -70,14 +70,14 @@
 	<h1 class="text-xl font-semibold">Add Storage</h1>
 
 	<Card.Root variant="glass" class="p-4">
-		<LocationPicker bind:locationId={parentId} bind:breadcrumb optional />
+		<StoragePicker bind:storageId={parentId} bind:breadcrumb optional />
 	</Card.Root>
 
 	<Card.Root variant="glass" class="p-4">
 		<Card.Content class="flex flex-col gap-4 p-0">
 			{#if scannedCode}
 				<p class="text-muted-foreground text-sm">
-					Code <span class="font-mono">{scannedCode}</span> from scan will be used for this location.
+					Code <span class="font-mono">{scannedCode}</span> from scan will be used for this storage.
 				</p>
 			{/if}
 

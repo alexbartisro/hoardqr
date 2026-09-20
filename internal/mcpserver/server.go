@@ -8,7 +8,7 @@ import (
 )
 
 // New builds the MCP server exposing the six tools from architecture plan
-// §11: find_items, where_is, list_contents, add_item, add_location, and
+// §11: find_items, where_is, list_contents, add_item, add_storage, and
 // move_item. The server authenticates as one configured user via a static
 // API token (checked by the caller — see cmd/hoardqr/main.go's use of
 // auth.RequireBearerToken) rather than anything here; per §11, per-caller
@@ -18,7 +18,7 @@ func New(pool *pgxpool.Pool) *mcp.Server {
 		&mcp.Implementation{Name: "hoardqr", Version: "0.1.0"},
 		&mcp.ServerOptions{
 			Logger:       slog.Default(),
-			Instructions: "Query and update a HoardQR home inventory: find items, resolve where something lives, list what's stored in a location, and add or move items and storage locations.",
+			Instructions: "Query and update a HoardQR home inventory: find items, resolve where something lives, list what's stored in a storage, and add or move items and storages.",
 		},
 	)
 	registerTools(s, pool)

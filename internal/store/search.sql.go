@@ -13,7 +13,7 @@ import (
 
 const findItemsByNormalizedCode = `-- name: FindItemsByNormalizedCode :many
 
-SELECT i.id, i.location_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
+SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
@@ -24,7 +24,7 @@ ORDER BY i.id
 
 type FindItemsByNormalizedCodeRow struct {
 	ID            int64
-	LocationID    int64
+	StorageID     int64
 	OwnerID       *int64
 	IsShared      bool
 	Name          string
@@ -63,7 +63,7 @@ func (q *Queries) FindItemsByNormalizedCode(ctx context.Context, code string) ([
 		var i FindItemsByNormalizedCodeRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.LocationID,
+			&i.StorageID,
 			&i.OwnerID,
 			&i.IsShared,
 			&i.Name,
@@ -90,14 +90,14 @@ func (q *Queries) FindItemsByNormalizedCode(ctx context.Context, code string) ([
 	return items, nil
 }
 
-const findLocationByNormalizedCode = `-- name: FindLocationByNormalizedCode :one
-SELECT id, parent_id, owner_id, is_shared, name, qr_token, photo_url, notes, created_at FROM locations
+const findStorageByNormalizedCode = `-- name: FindStorageByNormalizedCode :one
+SELECT id, parent_id, owner_id, is_shared, name, qr_token, photo_url, notes, created_at FROM storages
 WHERE TRANSLATE(UPPER(qr_token), 'OIL', '011') = TRANSLATE(UPPER($1::text), 'OIL', '011')
 `
 
-func (q *Queries) FindLocationByNormalizedCode(ctx context.Context, code string) (Location, error) {
-	row := q.db.QueryRow(ctx, findLocationByNormalizedCode, code)
-	var i Location
+func (q *Queries) FindStorageByNormalizedCode(ctx context.Context, code string) (Storage, error) {
+	row := q.db.QueryRow(ctx, findStorageByNormalizedCode, code)
+	var i Storage
 	err := row.Scan(
 		&i.ID,
 		&i.ParentID,
@@ -126,9 +126,9 @@ matches AS (
     )
     UNION ALL
     (
-        SELECT 'location'::text AS kind, l.id, l.name, 1.0::real AS score
-        FROM locations l, params p
-        WHERE TRANSLATE(UPPER(l.qr_token), 'OIL', '011') = TRANSLATE(UPPER(p.raw), 'OIL', '011')
+        SELECT 'storage'::text AS kind, s.id, s.name, 1.0::real AS score
+        FROM storages s, params p
+        WHERE TRANSLATE(UPPER(s.qr_token), 'OIL', '011') = TRANSLATE(UPPER(p.raw), 'OIL', '011')
     )
     UNION ALL
     (
@@ -147,18 +147,18 @@ matches AS (
     )
     UNION ALL
     (
-        SELECT 'location'::text AS kind, l.id, l.name,
+        SELECT 'storage'::text AS kind, s.id, s.name,
             GREATEST(
-                similarity(l.name, p.raw),
+                similarity(s.name, p.raw),
                 CASE
-                    WHEN lower(l.name) = lower(p.raw) THEN 1.0
-                    WHEN l.name ILIKE p.like_escaped || '%' ESCAPE '\' THEN 0.8
-                    WHEN l.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' THEN 0.5
+                    WHEN lower(s.name) = lower(p.raw) THEN 1.0
+                    WHEN s.name ILIKE p.like_escaped || '%' ESCAPE '\' THEN 0.8
+                    WHEN s.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' THEN 0.5
                     ELSE 0.0
                 END
             )::real AS score
-        FROM locations l, params p
-        WHERE l.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' OR l.name % p.raw
+        FROM storages s, params p
+        WHERE s.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' OR s.name % p.raw
     )
     UNION ALL
     (
@@ -181,7 +181,7 @@ deduped AS (
     FROM matches
     ORDER BY kind, id, score DESC
 )
-SELECT d.kind, d.id, d.name, d.score, i.location_id
+SELECT d.kind, d.id, d.name, d.score, i.storage_id
 FROM deduped d
 LEFT JOIN items i ON d.kind = 'item' AND i.id = d.id
 ORDER BY d.score DESC, d.name
@@ -189,11 +189,11 @@ LIMIT 10
 `
 
 type SearchSuggestRow struct {
-	Kind       string
-	ID         int64
-	Name       string
-	Score      float32
-	LocationID *int64
+	Kind      string
+	ID        int64
+	Name      string
+	Score     float32
+	StorageID *int64
 }
 
 // ⚠️ This query's `matches` CTE is byte-identical to SearchSuggestByKind's
@@ -213,7 +213,7 @@ type SearchSuggestRow struct {
 // 0.3 threshold, which the mock's tiering doesn't.
 //
 // Also note: this query's own LIMIT 10 applies across ALL kinds combined —
-// correct for an autocomplete dropdown (and for location-picker.svelte,
+// correct for an autocomplete dropdown (and for storage-picker.svelte,
 // which also calls this via GET /api/search/suggest), wrong for anything
 // that wants the best matches of one specific kind. Use SearchSuggestByKind
 // for that instead of filtering this query's results by kind in Go — see
@@ -229,9 +229,9 @@ type SearchSuggestRow struct {
 // a query can hit both an entity's code and its name, and without the dedup
 // step that entity would appear twice.
 //
-// Each item hit's location_id comes from a LEFT JOIN against deduped, not a
+// Each item hit's storage_id comes from a LEFT JOIN against deduped, not a
 // separate per-row lookup — an earlier version fetched it with a follow-up
-// GetItemLocationID :one call per hit, which (a) meant up to 10 extra round
+// GetItemStorageID :one call per hit, which (a) meant up to 10 extra round
 // trips per keystroke and (b) would 500 the whole request if an item was
 // deleted between the two queries, since a :one query returning zero rows is
 // pgx.ErrNoRows and that path wasn't checked. One statement = one snapshot,
@@ -250,7 +250,7 @@ func (q *Queries) SearchSuggest(ctx context.Context, query string) ([]SearchSugg
 			&i.ID,
 			&i.Name,
 			&i.Score,
-			&i.LocationID,
+			&i.StorageID,
 		); err != nil {
 			return nil, err
 		}
@@ -276,9 +276,9 @@ matches AS (
     )
     UNION ALL
     (
-        SELECT 'location'::text AS kind, l.id, l.name, 1.0::real AS score
-        FROM locations l, params p
-        WHERE TRANSLATE(UPPER(l.qr_token), 'OIL', '011') = TRANSLATE(UPPER(p.raw), 'OIL', '011')
+        SELECT 'storage'::text AS kind, s.id, s.name, 1.0::real AS score
+        FROM storages s, params p
+        WHERE TRANSLATE(UPPER(s.qr_token), 'OIL', '011') = TRANSLATE(UPPER(p.raw), 'OIL', '011')
     )
     UNION ALL
     (
@@ -297,18 +297,18 @@ matches AS (
     )
     UNION ALL
     (
-        SELECT 'location'::text AS kind, l.id, l.name,
+        SELECT 'storage'::text AS kind, s.id, s.name,
             GREATEST(
-                similarity(l.name, p.raw),
+                similarity(s.name, p.raw),
                 CASE
-                    WHEN lower(l.name) = lower(p.raw) THEN 1.0
-                    WHEN l.name ILIKE p.like_escaped || '%' ESCAPE '\' THEN 0.8
-                    WHEN l.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' THEN 0.5
+                    WHEN lower(s.name) = lower(p.raw) THEN 1.0
+                    WHEN s.name ILIKE p.like_escaped || '%' ESCAPE '\' THEN 0.8
+                    WHEN s.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' THEN 0.5
                     ELSE 0.0
                 END
             )::real AS score
-        FROM locations l, params p
-        WHERE l.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' OR l.name % p.raw
+        FROM storages s, params p
+        WHERE s.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' OR s.name % p.raw
     )
     UNION ALL
     (
@@ -332,7 +332,7 @@ deduped AS (
     WHERE kind = $2::text
     ORDER BY kind, id, score DESC
 )
-SELECT d.kind, d.id, d.name, d.score, i.location_id
+SELECT d.kind, d.id, d.name, d.score, i.storage_id
 FROM deduped d
 LEFT JOIN items i ON d.kind = 'item' AND i.id = d.id
 ORDER BY d.score DESC, d.name
@@ -345,11 +345,11 @@ type SearchSuggestByKindParams struct {
 }
 
 type SearchSuggestByKindRow struct {
-	Kind       string
-	ID         int64
-	Name       string
-	Score      float32
-	LocationID *int64
+	Kind      string
+	ID        int64
+	Name      string
+	Score     float32
+	StorageID *int64
 }
 
 // ⚠️ This query's `matches` CTE is byte-identical to SearchSuggest's above
@@ -360,12 +360,12 @@ type SearchSuggestByKindRow struct {
 // restricting to a single kind, not before — SearchSuggest's shared top-10
 // across kinds is exactly right for an autocomplete dropdown (the web
 // search bar, backed by SearchSuggest directly — including
-// location-picker.svelte, which resolves locations specifically but still
+// storage-picker.svelte, which resolves storages specifically but still
 // goes through the shared, unfiltered query; a human seeing "no results"
 // there is a lesser version of this same crowding shape, accepted for now
 // since it's read-only with a human in the loop, not silently wrong like a
 // write path would be), but wrong for the MCP resolvers
-// (internal/mcpserver/resolve.go's resolveLocation/resolveItem) and
+// (internal/mcpserver/resolve.go's resolveStorage/resolveItem) and
 // find_items, which each want the best matches of ONE kind and were
 // filtering SearchSuggest's mixed top-10 in Go. That let higher-scoring
 // matches of a different kind silently crowd out the kind actually being
@@ -388,7 +388,7 @@ func (q *Queries) SearchSuggestByKind(ctx context.Context, arg SearchSuggestByKi
 			&i.ID,
 			&i.Name,
 			&i.Score,
-			&i.LocationID,
+			&i.StorageID,
 		); err != nil {
 			return nil, err
 		}

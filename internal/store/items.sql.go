@@ -28,7 +28,7 @@ DELETE FROM items WHERE id = $1
 `
 
 // Item PATCH is hand-written in internal/api/items.go, same reasoning as
-// location PATCH — arbitrary subset of columns, nullable fields included.
+// storage PATCH — arbitrary subset of columns, nullable fields included.
 func (q *Queries) DeleteItem(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, deleteItem, id)
 	return err
@@ -36,7 +36,7 @@ func (q *Queries) DeleteItem(ctx context.Context, id int64) error {
 
 const getItemByID = `-- name: GetItemByID :one
 
-SELECT i.id, i.location_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
+SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
@@ -46,7 +46,7 @@ GROUP BY i.id
 
 type GetItemByIDRow struct {
 	ID            int64
-	LocationID    int64
+	StorageID     int64
 	OwnerID       *int64
 	IsShared      bool
 	Name          string
@@ -72,7 +72,7 @@ func (q *Queries) GetItemByID(ctx context.Context, id int64) (GetItemByIDRow, er
 	var i GetItemByIDRow
 	err := row.Scan(
 		&i.ID,
-		&i.LocationID,
+		&i.StorageID,
 		&i.OwnerID,
 		&i.IsShared,
 		&i.Name,
@@ -118,15 +118,15 @@ func (q *Queries) GetTagByNameCI(ctx context.Context, lower string) (Tag, error)
 
 const insertItem = `-- name: InsertItem :one
 INSERT INTO items (
-    location_id, owner_id, is_shared, name, description, quantity, condition,
+    storage_id, owner_id, is_shared, name, description, quantity, condition,
     qr_token, photo_url, purchase_date, purchase_price, receipt_url, custom_fields
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-RETURNING id, location_id, owner_id, is_shared, name, description, quantity, condition, qr_token, photo_url, purchase_date, purchase_price, receipt_url, custom_fields, created_at, updated_at
+RETURNING id, storage_id, owner_id, is_shared, name, description, quantity, condition, qr_token, photo_url, purchase_date, purchase_price, receipt_url, custom_fields, created_at, updated_at
 `
 
 type InsertItemParams struct {
-	LocationID    int64
+	StorageID     int64
 	OwnerID       *int64
 	IsShared      bool
 	Name          string
@@ -143,7 +143,7 @@ type InsertItemParams struct {
 
 func (q *Queries) InsertItem(ctx context.Context, arg InsertItemParams) (Item, error) {
 	row := q.db.QueryRow(ctx, insertItem,
-		arg.LocationID,
+		arg.StorageID,
 		arg.OwnerID,
 		arg.IsShared,
 		arg.Name,
@@ -160,7 +160,7 @@ func (q *Queries) InsertItem(ctx context.Context, arg InsertItemParams) (Item, e
 	var i Item
 	err := row.Scan(
 		&i.ID,
-		&i.LocationID,
+		&i.StorageID,
 		&i.OwnerID,
 		&i.IsShared,
 		&i.Name,
@@ -219,11 +219,11 @@ const listItems = `-- name: ListItems :many
 WITH params AS (
     SELECT replace(replace(replace($2::text, '\', '\\'), '%', '\%'), '_', '\_') AS q_escaped
 )
-SELECT i.id, i.location_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
+SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
-WHERE ($1::bigint IS NULL OR i.location_id = $1)
+WHERE ($1::bigint IS NULL OR i.storage_id = $1)
   AND ($2::text IS NULL OR i.name ILIKE '%' || (SELECT q_escaped FROM params) || '%' ESCAPE '\')
   AND (
     $3::text IS NULL OR EXISTS (
@@ -237,14 +237,14 @@ ORDER BY i.name
 `
 
 type ListItemsParams struct {
-	LocationID *int64
-	Q          *string
-	Tag        *string
+	StorageID *int64
+	Q         *string
+	Tag       *string
 }
 
 type ListItemsRow struct {
 	ID            int64
-	LocationID    int64
+	StorageID     int64
 	OwnerID       *int64
 	IsShared      bool
 	Name          string
@@ -262,7 +262,7 @@ type ListItemsRow struct {
 	Tags          []string
 }
 
-// location_id/q/tag are all optional filters (§9) — sqlc.narg + the
+// storage_id/q/tag are all optional filters (§9) — sqlc.narg + the
 // "IS NULL OR ..." pattern lets one static query cover every combination.
 // q is LIKE-escaped the same way search.sql's SearchSuggest already is
 // (backslash doubled first, then % and _ escaped, matched with ESCAPE '\')
@@ -271,7 +271,7 @@ type ListItemsRow struct {
 // unescaped (q=% matched every item; q=_amme_ matched "Hammer"). The
 // params CTE mirrors search.sql's own naming for the same computation.
 func (q *Queries) ListItems(ctx context.Context, arg ListItemsParams) ([]ListItemsRow, error) {
-	rows, err := q.db.Query(ctx, listItems, arg.LocationID, arg.Q, arg.Tag)
+	rows, err := q.db.Query(ctx, listItems, arg.StorageID, arg.Q, arg.Tag)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +281,7 @@ func (q *Queries) ListItems(ctx context.Context, arg ListItemsParams) ([]ListIte
 		var i ListItemsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.LocationID,
+			&i.StorageID,
 			&i.OwnerID,
 			&i.IsShared,
 			&i.Name,
@@ -308,19 +308,19 @@ func (q *Queries) ListItems(ctx context.Context, arg ListItemsParams) ([]ListIte
 	return items, nil
 }
 
-const listItemsByLocationIDs = `-- name: ListItemsByLocationIDs :many
-SELECT i.id, i.location_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
+const listItemsByStorageIDs = `-- name: ListItemsByStorageIDs :many
+SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
-WHERE i.location_id = ANY($1::bigint[])
+WHERE i.storage_id = ANY($1::bigint[])
 GROUP BY i.id
 ORDER BY i.name
 `
 
-type ListItemsByLocationIDsRow struct {
+type ListItemsByStorageIDsRow struct {
 	ID            int64
-	LocationID    int64
+	StorageID     int64
 	OwnerID       *int64
 	IsShared      bool
 	Name          string
@@ -338,20 +338,20 @@ type ListItemsByLocationIDsRow struct {
 	Tags          []string
 }
 
-// Backs GET /api/locations/:id/contents — location_ids is the recursive
-// descendant set from DescendantLocationIDs.
-func (q *Queries) ListItemsByLocationIDs(ctx context.Context, locationIds []int64) ([]ListItemsByLocationIDsRow, error) {
-	rows, err := q.db.Query(ctx, listItemsByLocationIDs, locationIds)
+// Backs GET /api/storages/:id/contents — storage_ids is the recursive
+// descendant set from DescendantStorageIDs.
+func (q *Queries) ListItemsByStorageIDs(ctx context.Context, storageIds []int64) ([]ListItemsByStorageIDsRow, error) {
+	rows, err := q.db.Query(ctx, listItemsByStorageIDs, storageIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListItemsByLocationIDsRow
+	var items []ListItemsByStorageIDsRow
 	for rows.Next() {
-		var i ListItemsByLocationIDsRow
+		var i ListItemsByStorageIDsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.LocationID,
+			&i.StorageID,
 			&i.OwnerID,
 			&i.IsShared,
 			&i.Name,
@@ -379,7 +379,7 @@ func (q *Queries) ListItemsByLocationIDs(ctx context.Context, locationIds []int6
 }
 
 const listRecentItems = `-- name: ListRecentItems :many
-SELECT i.id, i.location_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
+SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
@@ -395,7 +395,7 @@ type ListRecentItemsParams struct {
 
 type ListRecentItemsRow struct {
 	ID            int64
-	LocationID    int64
+	StorageID     int64
 	OwnerID       *int64
 	IsShared      bool
 	Name          string
@@ -431,7 +431,7 @@ func (q *Queries) ListRecentItems(ctx context.Context, arg ListRecentItemsParams
 		var i ListRecentItemsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.LocationID,
+			&i.StorageID,
 			&i.OwnerID,
 			&i.IsShared,
 			&i.Name,
@@ -518,14 +518,14 @@ func (q *Queries) TagNamesForItem(ctx context.Context, itemID int64) ([]string, 
 	return items, nil
 }
 
-const updateItemLocation = `-- name: UpdateItemLocation :execrows
-UPDATE items SET location_id = $1::bigint, updated_at = now()
+const updateItemStorage = `-- name: UpdateItemStorage :execrows
+UPDATE items SET storage_id = $1::bigint, updated_at = now()
 WHERE id = $2::bigint
 `
 
-type UpdateItemLocationParams struct {
-	LocationID int64
-	ID         int64
+type UpdateItemStorageParams struct {
+	StorageID int64
+	ID        int64
 }
 
 // Backs the MCP move_item tool (§11) — a plain reassignment, paired with an
@@ -536,8 +536,8 @@ type UpdateItemLocationParams struct {
 // the pool, outside this transaction) and this UPDATE — without it, 0 rows
 // affected still committed an audit_log "moved" row and reported success
 // for a move that never happened.
-func (q *Queries) UpdateItemLocation(ctx context.Context, arg UpdateItemLocationParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateItemLocation, arg.LocationID, arg.ID)
+func (q *Queries) UpdateItemStorage(ctx context.Context, arg UpdateItemStorageParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateItemStorage, arg.StorageID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

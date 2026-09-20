@@ -1,8 +1,8 @@
 <script lang="ts">
 	// Shared photo-attach component (architecture plan §2/§12), reused by the
-	// Add Object / Add Storage flows and the item/location detail pages —
+	// Add Object / Add Storage flows and the item/storage detail pages —
 	// same "build it once, don't reimplement per-screen" reasoning as
-	// location-picker.svelte. Compresses client-side (resize to 1600px on the
+	// storage-picker.svelte. Compresses client-side (resize to 1600px on the
 	// longest edge, re-encode to WebP, in a Web Worker) before ever uploading
 	// anything — that re-encoding also strips EXIF/GPS along the way, per §12.
 	import imageCompression from 'browser-image-compression';
@@ -15,9 +15,9 @@
 	}: {
 		photoUrl?: string | null;
 		/** Fired after a successful upload or a removal — callers that need the
-		 * change persisted immediately (item/location detail pages, which have
+		 * change persisted immediately (item/storage detail pages, which have
 		 * no surrounding form/submit step) do that here rather than this
-		 * component knowing anything about items or locations. */
+		 * component knowing anything about items or storages. */
 		onchange?: (photoUrl: string | null) => void;
 	} = $props();
 

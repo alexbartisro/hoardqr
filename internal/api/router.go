@@ -27,7 +27,7 @@ func NewRouter(pool *pgxpool.Pool, uploadDir string) chi.Router {
 
 	r.Get("/healthz", HealthzHandler(pool))
 
-	r.Route("/api/locations", NewLocationsHandler(pool).Routes)
+	r.Route("/api/storages", NewStoragesHandler(pool).Routes)
 	r.Route("/api/items", NewItemsHandler(pool).Routes)
 	r.Route("/api/tags", NewTagsHandler(pool).Routes)
 	r.Route("/api/photos", NewPhotosHandler(uploadDir).Routes)
@@ -35,7 +35,7 @@ func NewRouter(pool *pgxpool.Pool, uploadDir string) chi.Router {
 	search := NewSearchHandler(pool)
 	r.Get("/api/search/suggest", search.Suggest)
 	r.Get("/api/scan", search.Scan)
-	r.Get("/api/resolve-location", search.ResolveLocation)
+	r.Get("/api/resolve-storage", search.ResolveStorage)
 
 	r.Handle("/uploads/*", http.StripPrefix("/uploads/", uploadsFileServer(uploadDir)))
 

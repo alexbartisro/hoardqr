@@ -9,7 +9,7 @@ import (
 // buildUpdateQuery constructs `UPDATE <table> SET col = $2, ... WHERE id = $1`
 // from a map of column name -> new value, for PATCH endpoints where any
 // subset of columns (including explicit nulls) may be present — see the
-// comment on LocationsHandler.update. table and the keys of set must come
+// comment on StoragesHandler.update. table and the keys of set must come
 // from a fixed, code-controlled allowlist, never directly from request
 // input: column/table names can't be parameterized in SQL, only values can,
 // so this is safe exactly because callers never pass a map built from

@@ -20,7 +20,7 @@ type AuditLog struct {
 
 type Item struct {
 	ID            int64
-	LocationID    int64
+	StorageID     int64
 	OwnerID       *int64
 	IsShared      bool
 	Name          string
@@ -42,7 +42,7 @@ type ItemTag struct {
 	TagID  int64
 }
 
-type Location struct {
+type Storage struct {
 	ID        int64
 	ParentID  *int64
 	OwnerID   *int64

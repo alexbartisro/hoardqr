@@ -20,7 +20,7 @@ import (
 const scoreEpsilon = 1e-6
 
 // ambiguousError formats the "can't tell which one" case shared by
-// resolveLocation/resolveItem — a name-based tool must refuse to guess when
+// resolveStorage/resolveItem — a name-based tool must refuse to guess when
 // two or more candidates are tied for the best match, rather than silently
 // acting on whichever one the query happened to return first. Read-only
 // tools (where_is, list_contents) become merely imprecise if this is
@@ -31,30 +31,30 @@ func ambiguousError(kind, query string, matches []string) error {
 	return toolErrorf("%q matches more than one %s, be more specific: %s", query, kind, strings.Join(matches, "; "))
 }
 
-// resolveLocation finds the best-matching location for a free-text name or
+// resolveStorage finds the best-matching storage for a free-text name or
 // code, built on the same SearchSuggest matching logic (§5) find_items also
 // uses — the same "type a name or code, let fuzzy/exact matching sort it
-// out" principle the web Location Picker (§7) already uses for this exact
+// out" principle the web Storage Picker (§7) already uses for this exact
 // problem. Uses SearchSuggestByKind, not SearchSuggest — a shared top-10
-// across kinds let a higher-scoring item/tag match crowd out the location
+// across kinds let a higher-scoring item/tag match crowd out the storage
 // this is actually looking for (or worse, cut a competing same-score
-// location before the tie could even be detected — see the Obsidian backend
-// TODO for the verified failure case). Returns the location id and its
+// storage before the tie could even be detected — see the Obsidian backend
+// TODO for the verified failure case). Returns the storage id and its
 // actual name (which may differ from the query, e.g. a fuzzy or
 // case-insensitive match), so callers can tell the caller what was actually
 // resolved rather than echoing back whatever text was passed in. Errors if
-// the top score is tied across two or more locations — see ambiguousError.
-func resolveLocation(ctx context.Context, q *store.Queries, name string) (id int64, matchedName string, err error) {
+// the top score is tied across two or more storages — see ambiguousError.
+func resolveStorage(ctx context.Context, q *store.Queries, name string) (id int64, matchedName string, err error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
-		return 0, "", toolErrorf("location name is required")
+		return 0, "", toolErrorf("storage name is required")
 	}
-	candidates, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: trimmed, Kind: "location"})
+	candidates, err := q.SearchSuggestByKind(ctx, store.SearchSuggestByKindParams{Query: trimmed, Kind: "storage"})
 	if err != nil {
 		return 0, "", err
 	}
 	if len(candidates) == 0 {
-		return 0, "", toolErrorf("no location matching %q found", trimmed)
+		return 0, "", toolErrorf("no storage matching %q found", trimmed)
 	}
 
 	// candidates preserves SearchSuggestByKind's own `ORDER BY score DESC,
@@ -76,19 +76,19 @@ func resolveLocation(ctx context.Context, q *store.Queries, name string) (id int
 			}
 			paths[i] = path
 		}
-		return 0, "", ambiguousError("location", trimmed, paths)
+		return 0, "", ambiguousError("storage", trimmed, paths)
 	}
 
 	return candidates[0].ID, candidates[0].Name, nil
 }
 
-// resolveItem is resolveLocation's item-side equivalent — also returns the
-// matched item's location_id, since every caller needs it (either to report
+// resolveItem is resolveStorage's item-side equivalent — also returns the
+// matched item's storage_id, since every caller needs it (either to report
 // where the item lives, or as the "from" side of a move). Uses
 // SearchSuggestByKind for the same crowding reason documented on
-// resolveLocation above. Errors if the top score is tied across two or more
+// resolveStorage above. Errors if the top score is tied across two or more
 // items — see ambiguousError.
-func resolveItem(ctx context.Context, q *store.Queries, name string) (id int64, matchedName string, locationID int64, err error) {
+func resolveItem(ctx context.Context, q *store.Queries, name string) (id int64, matchedName string, storageID int64, err error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
 		return 0, "", 0, toolErrorf("item name is required")
@@ -100,11 +100,11 @@ func resolveItem(ctx context.Context, q *store.Queries, name string) (id int64, 
 
 	var candidates []store.SearchSuggestByKindRow
 	for _, row := range rows {
-		if row.LocationID == nil {
+		if row.StorageID == nil {
 			// Can't happen given SearchSuggestByKind's LEFT JOIN always
-			// supplies location_id for kind="item" rows, but fail loudly
+			// supplies storage_id for kind="item" rows, but fail loudly
 			// rather than silently if that invariant ever breaks.
-			return 0, "", 0, toolErrorf("item %q has no location_id (data inconsistency)", row.Name)
+			return 0, "", 0, toolErrorf("item %q has no storage_id (data inconsistency)", row.Name)
 		}
 		candidates = append(candidates, row)
 	}
@@ -122,7 +122,7 @@ func resolveItem(ctx context.Context, q *store.Queries, name string) (id int64, 
 	if len(tied) > 1 {
 		descriptions := make([]string, len(tied))
 		for i, t := range tied {
-			path, err := breadcrumbText(ctx, q, *t.LocationID)
+			path, err := breadcrumbText(ctx, q, *t.StorageID)
 			if err != nil {
 				return 0, "", 0, err
 			}
@@ -132,14 +132,14 @@ func resolveItem(ctx context.Context, q *store.Queries, name string) (id int64, 
 	}
 
 	top := candidates[0]
-	return top.ID, top.Name, *top.LocationID, nil
+	return top.ID, top.Name, *top.StorageID, nil
 }
 
-// breadcrumbText joins a location's root-to-leaf path the same way every
+// breadcrumbText joins a storage's root-to-leaf path the same way every
 // other breadcrumb in the app does (e.g. internal/api/items.go's
 // GetItemByID handler) — "Balcony > Storage Cabinet".
-func breadcrumbText(ctx context.Context, q *store.Queries, locationID int64) (string, error) {
-	crumb, err := q.LocationBreadcrumb(ctx, locationID)
+func breadcrumbText(ctx context.Context, q *store.Queries, storageID int64) (string, error) {
+	crumb, err := q.StorageBreadcrumb(ctx, storageID)
 	if err != nil {
 		return "", err
 	}

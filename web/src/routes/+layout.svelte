@@ -21,11 +21,11 @@
 
 	// Bottom tab bar's own primary nav — the header never grew one (see the
 	// tabs array below). Storage/Objects stay "active" while browsing into a
-	// single location/item too (startsWith, not exact match): those pages are
+	// single storage/item too (startsWith, not exact match): those pages are
 	// reached from and conceptually part of that section, not the dashboard.
 	const tabs = [
 		{ href: '/', label: 'Home', icon: House, active: () => page.url.pathname === '/' },
-		{ href: '/locations', label: 'Storage', icon: Boxes, active: () => page.url.pathname.startsWith('/locations') },
+		{ href: '/storages', label: 'Storage', icon: Boxes, active: () => page.url.pathname.startsWith('/storages') },
 		{ href: '/items', label: 'Objects', icon: Package, active: () => page.url.pathname.startsWith('/items') }
 	];
 </script>

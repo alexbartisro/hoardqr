@@ -18,8 +18,8 @@ WHERE TRANSLATE(UPPER(i.qr_token), 'OIL', '011') = TRANSLATE(UPPER(sqlc.arg(code
 GROUP BY i.id
 ORDER BY i.id;
 
--- name: FindLocationByNormalizedCode :one
-SELECT * FROM locations
+-- name: FindStorageByNormalizedCode :one
+SELECT * FROM storages
 WHERE TRANSLATE(UPPER(qr_token), 'OIL', '011') = TRANSLATE(UPPER(sqlc.arg(code)::text), 'OIL', '011');
 
 -- name: SearchSuggest :many
@@ -40,7 +40,7 @@ WHERE TRANSLATE(UPPER(qr_token), 'OIL', '011') = TRANSLATE(UPPER(sqlc.arg(code):
 -- 0.3 threshold, which the mock's tiering doesn't.
 --
 -- Also note: this query's own LIMIT 10 applies across ALL kinds combined —
--- correct for an autocomplete dropdown (and for location-picker.svelte,
+-- correct for an autocomplete dropdown (and for storage-picker.svelte,
 -- which also calls this via GET /api/search/suggest), wrong for anything
 -- that wants the best matches of one specific kind. Use SearchSuggestByKind
 -- for that instead of filtering this query's results by kind in Go — see
@@ -56,9 +56,9 @@ WHERE TRANSLATE(UPPER(qr_token), 'OIL', '011') = TRANSLATE(UPPER(sqlc.arg(code):
 -- a query can hit both an entity's code and its name, and without the dedup
 -- step that entity would appear twice.
 --
--- Each item hit's location_id comes from a LEFT JOIN against deduped, not a
+-- Each item hit's storage_id comes from a LEFT JOIN against deduped, not a
 -- separate per-row lookup — an earlier version fetched it with a follow-up
--- GetItemLocationID :one call per hit, which (a) meant up to 10 extra round
+-- GetItemStorageID :one call per hit, which (a) meant up to 10 extra round
 -- trips per keystroke and (b) would 500 the whole request if an item was
 -- deleted between the two queries, since a :one query returning zero rows is
 -- pgx.ErrNoRows and that path wasn't checked. One statement = one snapshot,
@@ -76,9 +76,9 @@ matches AS (
     )
     UNION ALL
     (
-        SELECT 'location'::text AS kind, l.id, l.name, 1.0::real AS score
-        FROM locations l, params p
-        WHERE TRANSLATE(UPPER(l.qr_token), 'OIL', '011') = TRANSLATE(UPPER(p.raw), 'OIL', '011')
+        SELECT 'storage'::text AS kind, s.id, s.name, 1.0::real AS score
+        FROM storages s, params p
+        WHERE TRANSLATE(UPPER(s.qr_token), 'OIL', '011') = TRANSLATE(UPPER(p.raw), 'OIL', '011')
     )
     UNION ALL
     (
@@ -97,18 +97,18 @@ matches AS (
     )
     UNION ALL
     (
-        SELECT 'location'::text AS kind, l.id, l.name,
+        SELECT 'storage'::text AS kind, s.id, s.name,
             GREATEST(
-                similarity(l.name, p.raw),
+                similarity(s.name, p.raw),
                 CASE
-                    WHEN lower(l.name) = lower(p.raw) THEN 1.0
-                    WHEN l.name ILIKE p.like_escaped || '%' ESCAPE '\' THEN 0.8
-                    WHEN l.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' THEN 0.5
+                    WHEN lower(s.name) = lower(p.raw) THEN 1.0
+                    WHEN s.name ILIKE p.like_escaped || '%' ESCAPE '\' THEN 0.8
+                    WHEN s.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' THEN 0.5
                     ELSE 0.0
                 END
             )::real AS score
-        FROM locations l, params p
-        WHERE l.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' OR l.name % p.raw
+        FROM storages s, params p
+        WHERE s.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' OR s.name % p.raw
     )
     UNION ALL
     (
@@ -131,7 +131,7 @@ deduped AS (
     FROM matches
     ORDER BY kind, id, score DESC
 )
-SELECT d.kind, d.id, d.name, d.score, i.location_id
+SELECT d.kind, d.id, d.name, d.score, i.storage_id
 FROM deduped d
 LEFT JOIN items i ON d.kind = 'item' AND i.id = d.id
 ORDER BY d.score DESC, d.name
@@ -146,12 +146,12 @@ LIMIT 10;
 -- restricting to a single kind, not before — SearchSuggest's shared top-10
 -- across kinds is exactly right for an autocomplete dropdown (the web
 -- search bar, backed by SearchSuggest directly — including
--- location-picker.svelte, which resolves locations specifically but still
+-- storage-picker.svelte, which resolves storages specifically but still
 -- goes through the shared, unfiltered query; a human seeing "no results"
 -- there is a lesser version of this same crowding shape, accepted for now
 -- since it's read-only with a human in the loop, not silently wrong like a
 -- write path would be), but wrong for the MCP resolvers
--- (internal/mcpserver/resolve.go's resolveLocation/resolveItem) and
+-- (internal/mcpserver/resolve.go's resolveStorage/resolveItem) and
 -- find_items, which each want the best matches of ONE kind and were
 -- filtering SearchSuggest's mixed top-10 in Go. That let higher-scoring
 -- matches of a different kind silently crowd out the kind actually being
@@ -173,9 +173,9 @@ matches AS (
     )
     UNION ALL
     (
-        SELECT 'location'::text AS kind, l.id, l.name, 1.0::real AS score
-        FROM locations l, params p
-        WHERE TRANSLATE(UPPER(l.qr_token), 'OIL', '011') = TRANSLATE(UPPER(p.raw), 'OIL', '011')
+        SELECT 'storage'::text AS kind, s.id, s.name, 1.0::real AS score
+        FROM storages s, params p
+        WHERE TRANSLATE(UPPER(s.qr_token), 'OIL', '011') = TRANSLATE(UPPER(p.raw), 'OIL', '011')
     )
     UNION ALL
     (
@@ -194,18 +194,18 @@ matches AS (
     )
     UNION ALL
     (
-        SELECT 'location'::text AS kind, l.id, l.name,
+        SELECT 'storage'::text AS kind, s.id, s.name,
             GREATEST(
-                similarity(l.name, p.raw),
+                similarity(s.name, p.raw),
                 CASE
-                    WHEN lower(l.name) = lower(p.raw) THEN 1.0
-                    WHEN l.name ILIKE p.like_escaped || '%' ESCAPE '\' THEN 0.8
-                    WHEN l.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' THEN 0.5
+                    WHEN lower(s.name) = lower(p.raw) THEN 1.0
+                    WHEN s.name ILIKE p.like_escaped || '%' ESCAPE '\' THEN 0.8
+                    WHEN s.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' THEN 0.5
                     ELSE 0.0
                 END
             )::real AS score
-        FROM locations l, params p
-        WHERE l.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' OR l.name % p.raw
+        FROM storages s, params p
+        WHERE s.name ILIKE '%' || p.like_escaped || '%' ESCAPE '\' OR s.name % p.raw
     )
     UNION ALL
     (
@@ -229,7 +229,7 @@ deduped AS (
     WHERE kind = sqlc.arg(kind)::text
     ORDER BY kind, id, score DESC
 )
-SELECT d.kind, d.id, d.name, d.score, i.location_id
+SELECT d.kind, d.id, d.name, d.score, i.storage_id
 FROM deduped d
 LEFT JOIN items i ON d.kind = 'item' AND i.id = d.id
 ORDER BY d.score DESC, d.name

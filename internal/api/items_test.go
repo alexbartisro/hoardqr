@@ -30,22 +30,22 @@ func TestItemsRejectNonObjectCustomFields(t *testing.T) {
 	// scenario this test guards against), a t.Fatalf skips any cleanup
 	// registration further down, and an ID-based cleanup registered only
 	// after a successful create would never run for that row. Items must be
-	// deleted before the location (items.location_id has no promotion logic
-	// via a raw DELETE, unlike LocationsHandler.delete's real endpoint).
+	// deleted before the storage (items.storage_id has no promotion logic
+	// via a raw DELETE, unlike StoragesHandler.delete's real endpoint).
 	t.Cleanup(func() {
 		if _, err := pool.Exec(ctx, `DELETE FROM items WHERE name = 'cf item'`); err != nil {
 			t.Logf("cleanup: deleting test items: %v", err)
 		}
-		if _, err := pool.Exec(ctx, `DELETE FROM locations WHERE qr_token = 'CFTEST-LOC'`); err != nil {
-			t.Logf("cleanup: deleting test location: %v", err)
+		if _, err := pool.Exec(ctx, `DELETE FROM storages WHERE qr_token = 'CFTEST-LOC'`); err != nil {
+			t.Logf("cleanup: deleting test storage: %v", err)
 		}
 	})
 
-	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
 		Name: "custom fields test root", QrToken: "CFTEST-LOC", IsShared: true,
 	})
 	if err != nil {
-		t.Fatalf("InsertLocation: %v", err)
+		t.Fatalf("InsertStorage: %v", err)
 	}
 
 	// "null" is deliberately not in this list: createItemRequest.CustomFields
@@ -58,7 +58,7 @@ func TestItemsRejectNonObjectCustomFields(t *testing.T) {
 	// generic map[string]json.RawMessage decode does see a present "null"
 	// and validateCustomFieldsObject correctly rejects it there.
 	for _, invalid := range []string{`5`, `[1,2,3]`, `"a string"`, `true`} {
-		body := fmt.Sprintf(`{"name": "cf item", "location_id": %d, "custom_fields": %s}`, loc.ID, invalid)
+		body := fmt.Sprintf(`{"name": "cf item", "storage_id": %d, "custom_fields": %s}`, storage.ID, invalid)
 		req := httptest.NewRequest(http.MethodPost, "/api/items", strings.NewReader(body))
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -68,7 +68,7 @@ func TestItemsRejectNonObjectCustomFields(t *testing.T) {
 	}
 
 	// A genuine object must still work.
-	body := fmt.Sprintf(`{"name": "cf item", "location_id": %d, "custom_fields": {"color": "red"}}`, loc.ID)
+	body := fmt.Sprintf(`{"name": "cf item", "storage_id": %d, "custom_fields": {"color": "red"}}`, storage.ID)
 	req := httptest.NewRequest(http.MethodPost, "/api/items", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -113,19 +113,19 @@ func TestItemUpdateRejectsBlankName(t *testing.T) {
 		if _, err := pool.Exec(ctx, `DELETE FROM items WHERE qr_token = 'BLANKNAME-ITEM'`); err != nil {
 			t.Logf("cleanup: deleting test item: %v", err)
 		}
-		if _, err := pool.Exec(ctx, `DELETE FROM locations WHERE qr_token = 'BLANKNAME-LOC'`); err != nil {
-			t.Logf("cleanup: deleting test location: %v", err)
+		if _, err := pool.Exec(ctx, `DELETE FROM storages WHERE qr_token = 'BLANKNAME-LOC'`); err != nil {
+			t.Logf("cleanup: deleting test storage: %v", err)
 		}
 	})
 
-	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
 		Name: "blank name test root", QrToken: "BLANKNAME-LOC", IsShared: true,
 	})
 	if err != nil {
-		t.Fatalf("InsertLocation: %v", err)
+		t.Fatalf("InsertStorage: %v", err)
 	}
 	item, err := q.InsertItem(ctx, store.InsertItemParams{
-		LocationID: loc.ID, Name: "original name", QrToken: "BLANKNAME-ITEM",
+		StorageID: storage.ID, Name: "original name", QrToken: "BLANKNAME-ITEM",
 		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
 	})
 	if err != nil {
@@ -149,9 +149,9 @@ func TestItemUpdateRejectsBlankName(t *testing.T) {
 }
 
 // TestItemCreateTreatsEmptyQrTokenAsAbsent mirrors
-// TestLocationCreateTreatsEmptyQrTokenAsAbsent — an explicit qr_token: ""
+// TestStorageCreateTreatsEmptyQrTokenAsAbsent — an explicit qr_token: ""
 // must auto-generate a real code, not store the empty string. Lower stakes
-// than the locations version (items.qr_token isn't unique, so there's no
+// than the storages version (items.qr_token isn't unique, so there's no
 // 409-masking failure mode), but an item stored with qr_token = "" would
 // still be unreachable by exact-code scan/search.
 func TestItemCreateTreatsEmptyQrTokenAsAbsent(t *testing.T) {
@@ -164,19 +164,19 @@ func TestItemCreateTreatsEmptyQrTokenAsAbsent(t *testing.T) {
 		if _, err := pool.Exec(ctx, `DELETE FROM items WHERE name = 'empty qr_token item test'`); err != nil {
 			t.Logf("cleanup: deleting test items: %v", err)
 		}
-		if _, err := pool.Exec(ctx, `DELETE FROM locations WHERE qr_token = 'EMPTYQR-ITEM-LOC'`); err != nil {
-			t.Logf("cleanup: deleting test location: %v", err)
+		if _, err := pool.Exec(ctx, `DELETE FROM storages WHERE qr_token = 'EMPTYQR-ITEM-LOC'`); err != nil {
+			t.Logf("cleanup: deleting test storage: %v", err)
 		}
 	})
 
-	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
 		Name: "empty qr_token item test root", QrToken: "EMPTYQR-ITEM-LOC", IsShared: true,
 	})
 	if err != nil {
-		t.Fatalf("InsertLocation: %v", err)
+		t.Fatalf("InsertStorage: %v", err)
 	}
 
-	body := fmt.Sprintf(`{"name": "empty qr_token item test", "location_id": %d, "qr_token": ""}`, loc.ID)
+	body := fmt.Sprintf(`{"name": "empty qr_token item test", "storage_id": %d, "qr_token": ""}`, storage.ID)
 	req := httptest.NewRequest(http.MethodPost, "/api/items", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -229,7 +229,7 @@ func TestRecentItemsHandlesLargePageWithoutOverflow(t *testing.T) {
 
 // TestRecentItemsCapsPageSize proves an unbounded pageSize is clamped —
 // without a cap, a single request could pull an arbitrary number of rows
-// and issue one LocationBreadcrumb query per row (N+1). Needs more than
+// and issue one StorageBreadcrumb query per row (N+1). Needs more than
 // maxRecentItemsPageSize real rows to be a meaningful assertion (the dev
 // database this runs against may otherwise have too few items for the cap
 // to ever actually bind), so this creates its own fixture data directly via
@@ -240,25 +240,25 @@ func TestRecentItemsCapsPageSize(t *testing.T) {
 	q := store.New(pool)
 	router := NewRouter(pool, t.TempDir())
 
-	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
 		Name: "recent items cap test root", QrToken: "RECENTCAP-LOC", IsShared: true,
 	})
 	if err != nil {
-		t.Fatalf("InsertLocation: %v", err)
+		t.Fatalf("InsertStorage: %v", err)
 	}
 	t.Cleanup(func() {
-		if _, err := pool.Exec(ctx, `DELETE FROM items WHERE location_id = $1`, loc.ID); err != nil {
+		if _, err := pool.Exec(ctx, `DELETE FROM items WHERE storage_id = $1`, storage.ID); err != nil {
 			t.Logf("cleanup: deleting test items: %v", err)
 		}
-		if _, err := pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID); err != nil {
-			t.Logf("cleanup: deleting test location: %v", err)
+		if _, err := pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, storage.ID); err != nil {
+			t.Logf("cleanup: deleting test storage: %v", err)
 		}
 	})
 
 	const fixtureCount = maxRecentItemsPageSize + 5
 	for i := 0; i < fixtureCount; i++ {
 		if _, err := q.InsertItem(ctx, store.InsertItemParams{
-			LocationID: loc.ID, Name: fmt.Sprintf("recent cap item %d", i), QrToken: codegen.PlainTextCode(),
+			StorageID: storage.ID, Name: fmt.Sprintf("recent cap item %d", i), QrToken: codegen.PlainTextCode(),
 			IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
 		}); err != nil {
 			t.Fatalf("InsertItem %d: %v", i, err)
@@ -296,21 +296,21 @@ func TestItemsQueryEscapesLikeMetacharacters(t *testing.T) {
 	q := store.New(pool)
 	router := NewRouter(pool, t.TempDir())
 
-	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
 		Name: "like escape test root", QrToken: "LIKEESC-LOC", IsShared: true,
 	})
 	if err != nil {
-		t.Fatalf("InsertLocation: %v", err)
+		t.Fatalf("InsertStorage: %v", err)
 	}
 	hammer, err := q.InsertItem(ctx, store.InsertItemParams{
-		LocationID: loc.ID, Name: "Hammer", QrToken: "LIKEESC-HAMMER",
+		StorageID: storage.ID, Name: "Hammer", QrToken: "LIKEESC-HAMMER",
 		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
 	})
 	if err != nil {
 		t.Fatalf("InsertItem hammer: %v", err)
 	}
 	percentItem, err := q.InsertItem(ctx, store.InsertItemParams{
-		LocationID: loc.ID, Name: "50% Off Coupon", QrToken: "LIKEESC-PERCENT",
+		StorageID: storage.ID, Name: "50% Off Coupon", QrToken: "LIKEESC-PERCENT",
 		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
 	})
 	if err != nil {
@@ -318,12 +318,12 @@ func TestItemsQueryEscapesLikeMetacharacters(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = ANY($1)`, []int64{hammer.ID, percentItem.ID})
-		_, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, storage.ID)
 	})
 
 	// A literal "%" query must not match every item — only the one that
 	// actually contains a "%" character.
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/items?location_id=%d&q=%%25", loc.ID), nil)
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/items?storage_id=%d&q=%%25", storage.ID), nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -339,7 +339,7 @@ func TestItemsQueryEscapesLikeMetacharacters(t *testing.T) {
 
 	// A literal "_amme_" query must not wildcard-match "Hammer" via _ standing
 	// in for any single character — it must not match at all.
-	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/items?location_id=%d&q=_amme_", loc.ID), nil)
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/items?storage_id=%d&q=_amme_", storage.ID), nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -358,7 +358,7 @@ func TestItemsQueryEscapesLikeMetacharacters(t *testing.T) {
 	// yields NULL, and `q IS NULL OR ...` short-circuits on the NULL check
 	// before ever evaluating the NULL-valued ILIKE), so this pins that the
 	// CTE didn't accidentally make the no-q path depend on it.
-	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/items?location_id=%d", loc.ID), nil)
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/items?storage_id=%d", storage.ID), nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -411,14 +411,14 @@ func TestItemUpdateRejectsPurchasePriceOutOfRange(t *testing.T) {
 	q := store.New(pool)
 	router := NewRouter(pool, t.TempDir())
 
-	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
 		Name: "price overflow test root", QrToken: "PRICEOVERFLOW-LOC", IsShared: true,
 	})
 	if err != nil {
-		t.Fatalf("InsertLocation: %v", err)
+		t.Fatalf("InsertStorage: %v", err)
 	}
 	item, err := q.InsertItem(ctx, store.InsertItemParams{
-		LocationID: loc.ID, Name: "price overflow test item", QrToken: "PRICEOVERFLOW-ITEM",
+		StorageID: storage.ID, Name: "price overflow test item", QrToken: "PRICEOVERFLOW-ITEM",
 		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
 	})
 	if err != nil {
@@ -426,7 +426,7 @@ func TestItemUpdateRejectsPurchasePriceOutOfRange(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID)
-		_, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, storage.ID)
 	})
 
 	// NUMERIC(10,2) allows at most 8 digits before the decimal point.
@@ -448,18 +448,18 @@ func TestItemCreateRejectsPurchasePriceOutOfRange(t *testing.T) {
 	q := store.New(pool)
 	router := NewRouter(pool, t.TempDir())
 
-	loc, err := q.InsertLocation(ctx, store.InsertLocationParams{
+	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
 		Name: "create price overflow test root", QrToken: "PRICEOVERFLOW-CREATE-LOC", IsShared: true,
 	})
 	if err != nil {
-		t.Fatalf("InsertLocation: %v", err)
+		t.Fatalf("InsertStorage: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM items WHERE location_id = $1`, loc.ID)
-		_, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM items WHERE storage_id = $1`, storage.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, storage.ID)
 	})
 
-	body := fmt.Sprintf(`{"name": "price overflow create item", "location_id": %d, "purchase_price": 1000000000000.00}`, loc.ID)
+	body := fmt.Sprintf(`{"name": "price overflow create item", "storage_id": %d, "purchase_price": 1000000000000.00}`, storage.ID)
 	req := httptest.NewRequest(http.MethodPost, "/api/items", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

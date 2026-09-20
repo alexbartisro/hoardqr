@@ -35,7 +35,7 @@ func (h *ItemsHandler) Routes(r chi.Router) {
 }
 
 // GET /api/items — two shapes behind one path, matching lib/api.ts's mock:
-//   - plain filters (q/tag/location_id) -> a bare Item[] (getItems)
+//   - plain filters (q/tag/storage_id) -> a bare Item[] (getItems)
 //   - ?sort=created_desc&page=&pageSize= -> {entries, total} (getRecentItems,
 //     the dashboard's newest-first feed — not in §9's table, see CLAUDE.md)
 func (h *ItemsHandler) list(w http.ResponseWriter, r *http.Request) {
@@ -45,14 +45,14 @@ func (h *ItemsHandler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var locationID *int64
-	if raw := q.Get("location_id"); raw != "" {
+	var storageID *int64
+	if raw := q.Get("storage_id"); raw != "" {
 		id, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "location_id must be an integer")
+			writeError(w, http.StatusBadRequest, "storage_id must be an integer")
 			return
 		}
-		locationID = &id
+		storageID = &id
 	}
 	var queryText, tag *string
 	if v := q.Get("q"); v != "" {
@@ -63,9 +63,9 @@ func (h *ItemsHandler) list(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.q.ListItems(r.Context(), store.ListItemsParams{
-		LocationID: locationID,
-		Q:          queryText,
-		Tag:        tag,
+		StorageID: storageID,
+		Q:         queryText,
+		Tag:       tag,
 	})
 	if err != nil {
 		serverError(w, r, err)
@@ -79,7 +79,7 @@ func (h *ItemsHandler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 // maxRecentItemsPageSize bounds how many rows (and how many N+1
-// LocationBreadcrumb queries below) a single request can trigger — without
+// StorageBreadcrumb queries below) a single request can trigger — without
 // it, a client-supplied pageSize had no ceiling at all.
 const maxRecentItemsPageSize = 100
 
@@ -131,10 +131,10 @@ func (h *ItemsHandler) listRecent(w http.ResponseWriter, r *http.Request) {
 	}
 	entries := make([]entry, len(rows))
 	for i, row := range rows {
-		// Deepest-location-first (opposite of every other breadcrumb in the
+		// Deepest-storage-first (opposite of every other breadcrumb in the
 		// app) — deliberate, see CLAUDE.md: for a scan-down-the-list glance,
-		// the immediate location is the more useful headline than the root.
-		crumb, err := h.q.LocationBreadcrumb(r.Context(), row.LocationID)
+		// the immediate storage is the more useful headline than the root.
+		crumb, err := h.q.StorageBreadcrumb(r.Context(), row.StorageID)
 		if err != nil {
 			serverError(w, r, err)
 			return
@@ -164,7 +164,7 @@ func (h *ItemsHandler) get(w http.ResponseWriter, r *http.Request) {
 		serverError(w, r, err)
 		return
 	}
-	breadcrumbRows, err := h.q.LocationBreadcrumb(r.Context(), row.LocationID)
+	breadcrumbRows, err := h.q.StorageBreadcrumb(r.Context(), row.StorageID)
 	if err != nil {
 		serverError(w, r, err)
 		return
@@ -181,7 +181,7 @@ func (h *ItemsHandler) get(w http.ResponseWriter, r *http.Request) {
 
 type createItemRequest struct {
 	Name          string           `json:"name"`
-	LocationID    int64            `json:"location_id"`
+	StorageID     int64            `json:"storage_id"`
 	Description   *string          `json:"description"`
 	Quantity      *int32           `json:"quantity"`
 	Condition     *string          `json:"condition"`
@@ -234,13 +234,13 @@ func (h *ItemsHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exists, err := h.q.LocationExists(r.Context(), req.LocationID)
+	exists, err := h.q.StorageExists(r.Context(), req.StorageID)
 	if err != nil {
 		serverError(w, r, err)
 		return
 	}
 	if !exists {
-		writeError(w, http.StatusUnprocessableEntity, "location does not exist")
+		writeError(w, http.StatusUnprocessableEntity, "storage does not exist")
 		return
 	}
 
@@ -254,7 +254,7 @@ func (h *ItemsHandler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	// An explicit qr_token: "" is treated the same as an absent one (still
 	// auto-generated) — not as "the caller provided the empty string as
-	// their token". Same reasoning as internal/api/locations.go's create
+	// their token". Same reasoning as internal/api/storages.go's create
 	// handler; lower stakes here since items.qr_token isn't unique (§3–4:
 	// the same barcode can tag several items), so there's no 409-masking
 	// failure mode, but an item stored with qr_token = "" is still
@@ -297,7 +297,7 @@ func (h *ItemsHandler) create(w http.ResponseWriter, r *http.Request) {
 		q := store.New(tx)
 		var err error
 		item, err = q.InsertItem(r.Context(), store.InsertItemParams{
-			LocationID:    req.LocationID,
+			StorageID:     req.StorageID,
 			OwnerID:       nil, // no auth yet (Phase 3 step 5)
 			IsShared:      isShared,
 			Name:          req.Name,
@@ -344,7 +344,7 @@ func (h *ItemsHandler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 // PATCH /api/items/:id — edit (including code), move, toggle is_shared (§9).
-// Same hand-written-dynamic-SET reasoning as LocationsHandler.update, plus
+// Same hand-written-dynamic-SET reasoning as StoragesHandler.update, plus
 // "tags" gets special handling since it isn't a real items column — it's the
 // item_tags join, replaced wholesale rather than merged (matching the mock's
 // plain Object.assign(item, patch), which overwrites the whole tags array).
@@ -380,22 +380,22 @@ func (h *ItemsHandler) update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			set["name"] = v
-		case "location_id":
+		case "storage_id":
 			var v int64
 			if err := json.Unmarshal(raw, &v); err != nil {
-				writeError(w, http.StatusBadRequest, "location_id must be an integer")
+				writeError(w, http.StatusBadRequest, "storage_id must be an integer")
 				return
 			}
-			exists, err := h.q.LocationExists(r.Context(), v)
+			exists, err := h.q.StorageExists(r.Context(), v)
 			if err != nil {
 				serverError(w, r, err)
 				return
 			}
 			if !exists {
-				writeError(w, http.StatusUnprocessableEntity, "location does not exist")
+				writeError(w, http.StatusUnprocessableEntity, "storage does not exist")
 				return
 			}
-			set["location_id"] = v
+			set["storage_id"] = v
 		case "description":
 			var v *string
 			if err := json.Unmarshal(raw, &v); err != nil {

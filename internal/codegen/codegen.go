@@ -1,6 +1,6 @@
-// Package codegen generates the plain-text location/item codes (architecture
+// Package codegen generates the plain-text storage/item codes (architecture
 // plan §4). Shared between internal/api (REST create endpoints) and
-// internal/mcpserver (the add_item/add_location MCP tools) so both create
+// internal/mcpserver (the add_item/add_storage MCP tools) so both create
 // paths produce identically-shaped codes without duplicating the alphabet.
 package codegen
 

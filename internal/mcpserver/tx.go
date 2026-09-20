@@ -30,8 +30,8 @@ func withTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) e
 }
 
 // isConflict reports whether err is a Postgres unique-violation (23505) —
-// used by add_location's retry-on-generated-code-collision loop, same
-// reasoning as internal/api/locations.go's create handler.
+// used by add_storage's retry-on-generated-code-collision loop, same
+// reasoning as internal/api/storages.go's create handler.
 func isConflict(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"

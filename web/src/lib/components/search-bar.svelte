@@ -1,8 +1,8 @@
 <script lang="ts">
-	// Global search (architecture plan §5) — same searchSuggest() the Location
+	// Global search (architecture plan §5) — same searchSuggest() the Storage
 	// Picker's Type tab and the MCP find_items tool use. Tag hits show for
 	// discoverability but aren't clickable yet: there's no tag-filtered browse
-	// route (only item/location detail pages exist so far) — rendered as a
+	// route (only item/storage detail pages exist so far) — rendered as a
 	// visually distinct chip, not a row, so it doesn't invite a click.
 	import { goto } from '$app/navigation';
 	import { searchSuggest } from '$lib/api';
@@ -49,7 +49,7 @@
 		open = false;
 		query = '';
 		suggestions = [];
-		goto(s.kind === 'item' ? `/items/${s.id}` : `/locations/${s.id}`);
+		goto(s.kind === 'item' ? `/items/${s.id}` : `/storages/${s.id}`);
 	}
 
 	// Closing on a plain `onblur` from the input breaks keyboard use — Tab-ing
@@ -59,7 +59,7 @@
 	// while still closing when focus leaves to anywhere else (click or Tab).
 	//
 	// This alone isn't enough for touch, though (regression found 2026-09-19:
-	// tapping a location result did nothing) — mobile Safari doesn't move
+	// tapping a storage result did nothing) — mobile Safari doesn't move
 	// focus to a `<button>` on tap (a long-standing WebKit quirk), so a tap
 	// blurs the input with `relatedTarget: null`, `handleFocusOut` reads that
 	// as "focus left the container" and closes the dropdown, and the
@@ -78,7 +78,7 @@
 </script>
 
 <div class="relative ml-auto w-full max-w-xs" bind:this={container} onfocusout={handleFocusOut}>
-	<Input placeholder="Search items, locations, tags…" bind:value={query} onfocus={() => (open = true)} />
+	<Input placeholder="Search items, storages, tags…" bind:value={query} onfocus={() => (open = true)} />
 	{#if open && query.trim()}
 		<div class="glass-panel absolute top-full left-0 z-20 mt-1 w-full rounded-md p-1">
 			{#if searching || query.trim() !== searchedQuery}

@@ -3,11 +3,11 @@
 	import Package from '@lucide/svelte/icons/package';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import Folder from '@lucide/svelte/icons/folder';
-	import { getRecentItems, getLocations } from '$lib/api';
-	import type { Item, Location } from '$lib/types';
+	import { getRecentItems, getStorages } from '$lib/api';
+	import type { Item, Storage } from '$lib/types';
 
 	// Both previews are teasers, not full browsers — "See all" hands off to
-	// /locations and /items (the tab bar's own destinations), which is where
+	// /storages and /items (the tab bar's own destinations), which is where
 	// the dashboard's old paginated Recent feed moved to. Capped small on
 	// purpose: this is a glance, not the primary way to browse either list
 	// anymore.
@@ -18,7 +18,7 @@
 	let recentTotal = $state(0);
 	let recentLoading = $state(true);
 
-	let roots = $state<Location[]>([]);
+	let roots = $state<Storage[]>([]);
 	let rootsLoading = $state(true);
 
 	$effect(() => {
@@ -27,12 +27,12 @@
 			recentTotal = res.total;
 			recentLoading = false;
 		});
-		// Root locations for a home inventory are structurally few (rooms/areas,
-		// not hundreds) — there's no paginated locations endpoint, so fetching
+		// Root storages for a home inventory are structurally few (rooms/areas,
+		// not hundreds) — there's no paginated storages endpoint, so fetching
 		// all of them and slicing client-side is the right call here, not a
 		// shortcut around missing pagination.
-		getLocations().then((locs) => {
-			roots = locs;
+		getStorages().then((storages) => {
+			roots = storages;
 			rootsLoading = false;
 		});
 	});
@@ -56,7 +56,7 @@
 			</Card.Root>
 		</a>
 
-		<a href="/locations/new" class="block">
+		<a href="/storages/new" class="block">
 			<Card.Root variant="glass" class="transition-transform active:scale-[0.98]">
 				<Card.Content class="flex flex-col items-center gap-2 py-2 text-center">
 					<FolderPlus class="text-primary size-7" />
@@ -70,7 +70,7 @@
 		<div class="flex items-center justify-between">
 			<h2 class="text-muted-foreground text-sm font-medium">Storage</h2>
 			{#if roots.length > STORAGE_PREVIEW_SIZE}
-				<a href="/locations" class="text-primary text-xs hover:underline">See all →</a>
+				<a href="/storages" class="text-primary text-xs hover:underline">See all →</a>
 			{/if}
 		</div>
 
@@ -79,12 +79,12 @@
 		{:else if roots.length === 0}
 			<p class="text-muted-foreground text-sm">No storage yet.</p>
 		{:else}
-			{#each roots.slice(0, STORAGE_PREVIEW_SIZE) as loc (loc.id)}
-				<a href="/locations/{loc.id}" class="block">
+			{#each roots.slice(0, STORAGE_PREVIEW_SIZE) as storage (storage.id)}
+				<a href="/storages/{storage.id}" class="block">
 					<Card.Root variant="glass" class="p-3">
 						<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
 							<Folder class="text-muted-foreground size-4 shrink-0" />
-							<span class="truncate">{loc.name}</span>
+							<span class="truncate">{storage.name}</span>
 						</Card.Content>
 					</Card.Root>
 				</a>
