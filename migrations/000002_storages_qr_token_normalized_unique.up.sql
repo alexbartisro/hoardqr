@@ -1,4 +1,4 @@
--- Closes the gap CLAUDE.md documented on 2026-09-17: locations.qr_token's
+-- Closes the gap CLAUDE.md documented on 2026-09-17: storages.qr_token's
 -- plain UNIQUE only catches identical raw strings, but scan/search lookups
 -- normalize common OCR/typing misreads first (O→0, I/L→1 — see §4 and
 -- internal/store/queries/search.sql). Two raw values like "H4K9P0" and
@@ -17,12 +17,12 @@
 -- No pre-check for existing collisions before creating this: there's no
 -- production data yet, so it's a cheap fix now rather than something to
 -- guard against. If this migration is ever run against a database that
--- already has two locations colliding under normalization, CREATE UNIQUE
+-- already has two storages colliding under normalization, CREATE UNIQUE
 -- INDEX fails, golang-migrate marks schema_migrations dirty at this version,
 -- and both `serve` and `mcp` crash-loop on every subsequent start until it's
 -- fixed manually: find and rename/delete the duplicate
 -- (SELECT TRANSLATE(UPPER(qr_token),'OIL','011'), array_agg(id) FROM
--- locations GROUP BY 1 HAVING count(*) > 1), then
+-- storages GROUP BY 1 HAVING count(*) > 1), then
 -- `migrate force <previous_version>` and re-run `migrate up`.
-CREATE UNIQUE INDEX idx_locations_qr_token_normalized
-    ON locations (TRANSLATE(UPPER(qr_token), 'OIL', '011'));
+CREATE UNIQUE INDEX idx_storages_qr_token_normalized
+    ON storages (TRANSLATE(UPPER(qr_token), 'OIL', '011'));

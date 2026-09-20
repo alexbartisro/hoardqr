@@ -26,7 +26,7 @@ type StorageDTO struct {
 	PhotoURL  *string `json:"photo_url"`
 	Notes     *string `json:"notes"`
 	CreatedAt string  `json:"created_at"`
-	// LocationID is a real column (migration 000005) and always present —
+	// LocationID is a real column (migration 000004) and always present —
 	// non-nil only on a root storage (CHECK-enforced). LocationName is only
 	// ever populated when converting from a query that actually joined
 	// locations (GetStoragesByParentRow) — omitted, not sent as null, from

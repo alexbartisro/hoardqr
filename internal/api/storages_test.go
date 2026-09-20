@@ -371,7 +371,7 @@ func TestStorageUpdateRejectsNonexistentParent(t *testing.T) {
 
 // TestStorageCreateWithLocation proves a root storage can be created with a
 // location assigned directly, and TestStorageCreateWithParentAndLocationRejected
-// proves the two are mutually exclusive at create time (migration 000005's
+// proves the two are mutually exclusive at create time (migration 000004's
 // storages_location_only_on_root, pre-checked for a clean 422 rather than a
 // raw 23514).
 func TestStorageCreateWithLocation(t *testing.T) {
@@ -538,7 +538,7 @@ func TestStorageDeletePropagatesLocationToPromotedChildren(t *testing.T) {
 }
 
 // TestStorageLocationCheckConstraintRejectsBothColumns proves the CHECK
-// constraint itself (migration 000005's storages_location_only_on_root),
+// constraint itself (migration 000004's storages_location_only_on_root),
 // not just the handler's pre-checks — a raw insert bypassing the API must
 // still be rejected by Postgres.
 func TestStorageLocationCheckConstraintRejectsBothColumns(t *testing.T) {

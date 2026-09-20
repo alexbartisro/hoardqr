@@ -14,7 +14,7 @@ import (
 )
 
 // LocationsHandler backs the flat, non-nested physical-property entity
-// added by migration 000005 (House, Garage, Parent's House) — a root
+// added by migration 000004 (House, Garage, Parent's House) — a root
 // storage may optionally belong to one. See architecture plan §3 and
 // CLAUDE.md's Locations design-decision notes.
 type LocationsHandler struct {

@@ -147,7 +147,7 @@ func breadcrumbText(ctx context.Context, q *store.Queries, storageID int64) (str
 	// Root-first, so an assigned Location (further out than even the root
 	// storage) prepends — same convention as internal/api/search.go's
 	// breadcrumbText, which this comes for free alongside (migration
-	// 000005 extended the shared StorageBreadcrumb query both call).
+	// 000004 extended the shared StorageBreadcrumb query both call).
 	if len(crumb) > 0 && crumb[0].LocationName != nil {
 		names = append(names, *crumb[0].LocationName)
 	}

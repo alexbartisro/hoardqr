@@ -183,7 +183,7 @@ func (h *StoragesHandler) create(w http.ResponseWriter, r *http.Request) {
 
 	// A location is only meaningful on a root storage — a nested storage
 	// inherits its location transitively from its root ancestor (see
-	// StorageBreadcrumb). storages_location_only_on_root (migration 000005)
+	// StorageBreadcrumb). storages_location_only_on_root (migration 000004)
 	// enforces this at the DB level too; this pre-check turns what would
 	// otherwise be a raw 23514 check-violation into a clean 422, same
 	// reasoning as the ParentID existence check above.
@@ -391,7 +391,7 @@ func (h *StoragesHandler) update(w http.ResponseWriter, r *http.Request) {
 		// A location is only meaningful on a root storage — moving this
 		// storage under a real parent must clear any location assigned to
 		// it, rather than surface a raw 23514 check-violation (migration
-		// 000005's storages_location_only_on_root). Reject outright rather
+		// 000004's storages_location_only_on_root). Reject outright rather
 		// than silently override when the caller also explicitly asked for
 		// a non-nil location_id in this same request — that combination is
 		// contradictory, not a case to guess at.
@@ -547,7 +547,7 @@ func (h *StoragesHandler) delete(w http.ResponseWriter, r *http.Request) {
 		// unassigned instead of keeping the property they were nested
 		// inside of. Only ever relevant here (storage.ParentID == nil): a
 		// nested storage can never itself carry a location (CHECK
-		// constraint, migration 000005), so a non-root storage's
+		// constraint, migration 000004), so a non-root storage's
 		// LocationID is always nil. childIDs must be captured *before*
 		// DeleteStorage runs (their parent_id is about to change), but
 		// SetLocationForStorages must run *after* it — setting location_id

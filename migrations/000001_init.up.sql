@@ -8,9 +8,9 @@ CREATE TABLE users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE locations (
+CREATE TABLE storages (
     id BIGSERIAL PRIMARY KEY,
-    parent_id BIGINT REFERENCES locations(id) ON DELETE SET NULL, -- a deleted location's children become root-level, not deleted
+    parent_id BIGINT REFERENCES storages(id) ON DELETE SET NULL, -- a deleted storage's children become root-level, not deleted
     owner_id BIGINT REFERENCES users(id),
     is_shared BOOLEAN NOT NULL DEFAULT true,   -- visible to every user in the instance
     name TEXT NOT NULL,
@@ -19,12 +19,12 @@ CREATE TABLE locations (
     notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_locations_parent ON locations(parent_id);
-CREATE INDEX idx_locations_name_trgm ON locations USING gin (name gin_trgm_ops);
+CREATE INDEX idx_storages_parent ON storages(parent_id);
+CREATE INDEX idx_storages_name_trgm ON storages USING gin (name gin_trgm_ops);
 
 CREATE TABLE items (
     id BIGSERIAL PRIMARY KEY,
-    location_id BIGINT NOT NULL REFERENCES locations(id) ON DELETE RESTRICT,
+    storage_id BIGINT NOT NULL REFERENCES storages(id) ON DELETE RESTRICT,
     owner_id BIGINT REFERENCES users(id),
     is_shared BOOLEAN NOT NULL DEFAULT true,
     name TEXT NOT NULL,
@@ -40,7 +40,7 @@ CREATE TABLE items (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_items_location ON items(location_id);
+CREATE INDEX idx_items_storage ON items(storage_id);
 CREATE INDEX idx_items_name_trgm ON items USING gin (name gin_trgm_ops);
 CREATE INDEX idx_items_custom_fields ON items USING gin (custom_fields);
 CREATE INDEX idx_items_qr_token ON items(qr_token);
@@ -59,7 +59,7 @@ CREATE TABLE item_tags (
 
 CREATE TABLE audit_log (
     id BIGSERIAL PRIMARY KEY,
-    entity_type TEXT NOT NULL,       -- 'item' | 'location'
+    entity_type TEXT NOT NULL,       -- 'item' | 'storage'
     entity_id BIGINT NOT NULL,
     action TEXT NOT NULL,            -- 'created' | 'moved' | 'updated' | 'deleted'
     user_id BIGINT REFERENCES users(id),

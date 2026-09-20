@@ -1,8 +1,8 @@
--- Locations (architecture plan §3, added post-rename — see migration 000005)
--- are a flat, non-nested physical-property entity: House, Garage, Parent's
--- House. No recursion, no code/qr_token, no breadcrumb of their own — a
--- storage's StorageBreadcrumb (storages.sql) picks up its assigned location
--- (if any) by walking to its root ancestor.
+-- Locations (architecture plan §3, migration 000004) are a flat, non-nested
+-- physical-property entity: House, Garage, Parent's House. No recursion, no
+-- code/qr_token, no breadcrumb of their own — a storage's StorageBreadcrumb
+-- (storages.sql) picks up its assigned location (if any) by walking to its
+-- root ancestor.
 
 -- name: ListLocations :many
 SELECT * FROM locations ORDER BY name;

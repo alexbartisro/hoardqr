@@ -1,8 +1,9 @@
--- The new "Location" entity (architecture plan §3, added post-rename —
--- migration 000004 freed this name) — a flat, non-nested physical property
--- (House, Garage, Parent's House). Deliberately bare: no qr_token (a house
--- isn't physically labeled), no photo_url/notes (trivial to add later, not
--- needed for a handful of rows).
+-- The "Location" entity (architecture plan §3) — a flat, non-nested
+-- physical property (House, Garage, Parent's House), separate from the
+-- self-referencing `storages` tree (boxes/shelves/rooms) migration 000001
+-- already defines. Deliberately bare: no qr_token (a house isn't physically
+-- labeled), no photo_url/notes (trivial to add later, not needed for a
+-- handful of rows).
 CREATE TABLE locations (
     id BIGSERIAL PRIMARY KEY,
     owner_id BIGINT REFERENCES users(id),

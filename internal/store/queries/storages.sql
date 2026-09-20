@@ -1,6 +1,6 @@
 -- name: GetStoragesByParent :many
 -- location_name is only ever non-null on a root row (location_id itself is
--- CHECK-constrained to root-only — see migration 000005) — the LEFT JOIN
+-- CHECK-constrained to root-only — see migration 000004) — the LEFT JOIN
 -- costs nothing extra for a nested row, which just gets a null. Used by the
 -- /storages browse page to group root storages by location without a
 -- second round trip per row.
@@ -29,7 +29,7 @@ SELECT EXISTS(SELECT 1 FROM storages WHERE id = $1);
 -- predate that check or were edited directly, and it bounds recursion to at
 -- most one pass over all storages regardless.
 --
--- Extended (migration 000005) to also resolve the assigned Location, if
+-- Extended (migration 000004) to also resolve the assigned Location, if
 -- any: `root` picks off the terminal (highest-depth) row's location_id —
 -- ORDER BY depth DESC LIMIT 1 rather than WHERE parent_id IS NULL so a
 -- corrupted cyclic chain degrades gracefully (no root row -> NULL via the
