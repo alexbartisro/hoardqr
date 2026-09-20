@@ -16,6 +16,8 @@ Pre-alpha, but deployable — running on the author's own homelab. The Go backen
 
 **Storage tree.** Boxes, shelves, cupboards, rooms — all the same kind of thing, nested as deep as you want. A storage can hold both items and other storages at once.
 
+**Locations — real-world properties, separate from the storage tree.** A flat, non-nested layer above it: a house, a garage, a parent's place. A root-level storage can optionally belong to one, so two storages with the same name in different properties (your own "Living Room" and your parents') stay distinguishable everywhere it matters — breadcrumbs, search suggestions, the storage browse page (grouped by Location, "Unassigned" last), and MCP tool responses. Manage them from a dedicated page: add, rename, delete (storages inside get safely unassigned, never silently deleted).
+
 **Items with real metadata.** Name, description, quantity, condition, tags (autocomplete, create-on-the-fly), a photo, purchase date and price, and a free-form custom-fields bucket for anything else — none of it required except a name and where it lives.
 
 **Three ways a code ends up on something**, all stored in the same field and resolved the same way at scan/search time:
@@ -35,7 +37,7 @@ Codes are editable after the fact (fixing a mis-printed or mis-written one is ju
 
 **A real dashboard**, not just a form: quick "Add Object"/"Add Storage" shortcuts, a preview of your root-level storages, and a newest-first preview of recently added items — each with a "See all" link once there's more than the preview shows.
 
-**Two dedicated browse pages**: `/storages` is your entire storage tree as an expandable list (fetches children lazily as you open each one — nothing loads until you ask for it); `/items` is every object you own, paginated, newest first, each with its full storage breadcrumb. A persistent bottom tab bar (Home / Storage / Objects) gets you to either from anywhere.
+**Two dedicated browse pages**: `/storages` is your entire storage tree as an expandable list, grouped by Location when you've set any up (fetches children lazily as you open each one — nothing loads until you ask for it); `/items` is every object you own, paginated, newest first, each with its full storage breadcrumb. A persistent bottom tab bar (Home / Storage / Objects) gets you to either from anywhere.
 
 **Photo uploads**, compressed and stripped of EXIF/GPS entirely client-side before they ever reach the server (resized to 1600px, re-encoded to WebP) — a multi-megabyte phone photo typically shrinks to under 300KB before upload even starts.
 
@@ -59,24 +61,26 @@ Being upfront about the gap between the architecture plan and what's actually ru
 - **A relative's old electronics show up in a box.** Half of them already have a manufacturer barcode on them — scan it while adding each one instead of generating and printing a new code; the retail barcode just becomes the item's code.
 - **You inherited a labeled box with no scannable code, just handwriting.** Read the label with the phone camera (OCR) instead of retyping it.
 - **Browsing rather than searching.** `/storages` to see the whole tree of where things live, `/items` to scroll everything you've cataloged newest-first — for when you don't know exactly what you're looking for yet, just want to look around.
+- **You (or your family) have stuff spread across more than one place.** Your own apartment and your parents' house both happen to have a "Living Room" storage — assign each to its own Location and every view (breadcrumbs, search, the storage browse page, MCP answers) keeps them straight, even though the storages themselves share a name.
 - **Ask an LLM to do the cataloging for you.** Because the MCP tools are the same operations the web UI uses, a capable chat client can add, find, and move things on your behalf conversationally — "I just bought a new drill, put it in the garage toolbox" — without you touching the app at all.
 
 ## MCP server
 
 Runs as a second process from the same binary (`hoardqr mcp`), separate port, Streamable HTTP transport at `/mcp`. Point any MCP-capable client at `http://<host>:8081/mcp` with the bearer token you set in `MCP_API_TOKEN`.
 
-Six tools, the same operations the web UI itself uses:
+Seven tools, the same operations the web UI itself uses:
 
 | Tool | Does |
 |---|---|
 | `find_items(query)` | Search by name, tag, or code |
 | `where_is(name)` | Resolve an item to its full storage breadcrumb |
-| `list_contents(storage)` | Everything stored in a storage, recursively |
+| `list_contents(storage?, location?)` | Everything stored in a storage (recursively), or across all of a Location's root storages combined — exactly one of the two |
 | `add_item(name, storage, quantity?)` | Catalog a new object |
-| `add_storage(name, parent?)` | Create a new storage |
+| `add_storage(name, parent?, location?)` | Create a new storage, optionally nested or assigned to a Location (never both) |
 | `move_item(item, new_storage)` | Move an existing item |
+| `list_locations()` | List every Location (read-only) |
 
-If two items or storages share a similar-enough name, the name-resolving tools refuse to guess and ask you to be more specific, rather than silently acting on the wrong one. If `MCP_API_TOKEN` is left unset, the server runs unauthenticated with a startup warning — fine on a LAN-only deploy, not recommended if this port is ever exposed further than that.
+If two items or storages share a similar-enough name, the name-resolving tools refuse to guess and ask you to be more specific, rather than silently acting on the wrong one — Location names match exactly instead, since there are only ever a handful. If `MCP_API_TOKEN` is left unset, the server runs unauthenticated with a startup warning — fine on a LAN-only deploy, not recommended if this port is ever exposed further than that.
 
 ## Stack
 
