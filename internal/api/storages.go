@@ -39,18 +39,16 @@ func parseIDParam(r *http.Request) (int64, error) {
 	return strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 }
 
-// breadcrumbDTO fetches and shapes a storage's root-to-leaf path — shared
-// by every handler below that needs one alongside the storage/item itself.
-func (h *StoragesHandler) breadcrumbDTO(ctx context.Context, storageID int64) ([]BreadcrumbEntryDTO, error) {
+// breadcrumbAndLocation fetches a storage's root-to-leaf path plus its
+// resolved location (if any) — shared by every handler below that needs
+// one alongside the storage/item itself.
+func (h *StoragesHandler) breadcrumbAndLocation(ctx context.Context, storageID int64) ([]BreadcrumbEntryDTO, *LocationRefDTO, error) {
 	rows, err := h.q.StorageBreadcrumb(ctx, storageID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	out := make([]BreadcrumbEntryDTO, len(rows))
-	for i, row := range rows {
-		out[i] = BreadcrumbEntryDTO{ID: row.ID, Name: row.Name}
-	}
-	return out, nil
+	breadcrumb, location := breadcrumbAndLocation(rows)
+	return breadcrumb, location, nil
 }
 
 // GET /api/storages?parent_id=
@@ -69,7 +67,7 @@ func (h *StoragesHandler) list(w http.ResponseWriter, r *http.Request) {
 		serverError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toStorageDTOs(storages))
+	writeJSON(w, http.StatusOK, toStorageDTOsFromListRows(storages))
 }
 
 // GET /api/storages/:id
@@ -88,7 +86,7 @@ func (h *StoragesHandler) get(w http.ResponseWriter, r *http.Request) {
 		serverError(w, r, err)
 		return
 	}
-	breadcrumb, err := h.breadcrumbDTO(r.Context(), id)
+	breadcrumb, location, err := h.breadcrumbAndLocation(r.Context(), id)
 	if err != nil {
 		serverError(w, r, err)
 		return
@@ -96,6 +94,7 @@ func (h *StoragesHandler) get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"storage":    toStorageDTO(storage),
 		"breadcrumb": breadcrumb,
+		"location":   location,
 	})
 }
 
@@ -115,7 +114,7 @@ func (h *StoragesHandler) contents(w http.ResponseWriter, r *http.Request) {
 		serverError(w, r, err)
 		return
 	}
-	breadcrumb, err := h.breadcrumbDTO(r.Context(), id)
+	breadcrumb, location, err := h.breadcrumbAndLocation(r.Context(), id)
 	if err != nil {
 		serverError(w, r, err)
 		return
@@ -137,17 +136,19 @@ func (h *StoragesHandler) contents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"storage":    toStorageDTO(storage),
 		"breadcrumb": breadcrumb,
+		"location":   location,
 		"items":      items,
 	})
 }
 
 type createStorageRequest struct {
-	Name     string  `json:"name"`
-	ParentID *int64  `json:"parent_id"`
-	QrToken  *string `json:"qr_token"`
-	PhotoURL *string `json:"photo_url"`
-	Notes    *string `json:"notes"`
-	IsShared *bool   `json:"is_shared"`
+	Name       string  `json:"name"`
+	ParentID   *int64  `json:"parent_id"`
+	LocationID *int64  `json:"location_id"`
+	QrToken    *string `json:"qr_token"`
+	PhotoURL   *string `json:"photo_url"`
+	Notes      *string `json:"notes"`
+	IsShared   *bool   `json:"is_shared"`
 }
 
 // POST /api/storages
@@ -176,6 +177,28 @@ func (h *StoragesHandler) create(w http.ResponseWriter, r *http.Request) {
 		}
 		if !exists {
 			writeError(w, http.StatusUnprocessableEntity, "parent storage does not exist")
+			return
+		}
+	}
+
+	// A location is only meaningful on a root storage — a nested storage
+	// inherits its location transitively from its root ancestor (see
+	// StorageBreadcrumb). storages_location_only_on_root (migration 000005)
+	// enforces this at the DB level too; this pre-check turns what would
+	// otherwise be a raw 23514 check-violation into a clean 422, same
+	// reasoning as the ParentID existence check above.
+	if req.ParentID != nil && req.LocationID != nil {
+		writeError(w, http.StatusUnprocessableEntity, "a nested storage inherits its location from its root storage")
+		return
+	}
+	if req.LocationID != nil {
+		exists, err := h.q.LocationExists(r.Context(), *req.LocationID)
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		if !exists {
+			writeError(w, http.StatusUnprocessableEntity, "location does not exist")
 			return
 		}
 	}
@@ -210,13 +233,14 @@ func (h *StoragesHandler) create(w http.ResponseWriter, r *http.Request) {
 			qrToken = codegen.PlainTextCode()
 		}
 		storage, err = h.q.InsertStorage(r.Context(), store.InsertStorageParams{
-			ParentID: req.ParentID,
-			OwnerID:  nil, // no auth yet (Phase 3 step 5) — every row is ownerless until then
-			IsShared: isShared,
-			Name:     req.Name,
-			QrToken:  qrToken,
-			PhotoUrl: req.PhotoURL,
-			Notes:    req.Notes,
+			ParentID:   req.ParentID,
+			OwnerID:    nil, // no auth yet (Phase 3 step 5) — every row is ownerless until then
+			IsShared:   isShared,
+			Name:       req.Name,
+			QrToken:    qrToken,
+			PhotoUrl:   req.PhotoURL,
+			Notes:      req.Notes,
+			LocationID: req.LocationID,
 		})
 		if err == nil {
 			break
@@ -276,6 +300,13 @@ func (h *StoragesHandler) update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			set["parent_id"] = v
+		case "location_id":
+			var v *int64
+			if err := json.Unmarshal(raw, &v); err != nil {
+				writeError(w, http.StatusBadRequest, "location_id must be an integer or null")
+				return
+			}
+			set["location_id"] = v
 		case "qr_token":
 			var v string
 			if err := json.Unmarshal(raw, &v); err != nil {
@@ -355,6 +386,53 @@ func (h *StoragesHandler) update(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusConflict, "parent_id would create a cycle (it is this storage or one of its own descendants)")
 				return
 			}
+		}
+
+		// A location is only meaningful on a root storage — moving this
+		// storage under a real parent must clear any location assigned to
+		// it, rather than surface a raw 23514 check-violation (migration
+		// 000005's storages_location_only_on_root). Reject outright rather
+		// than silently override when the caller also explicitly asked for
+		// a non-nil location_id in this same request — that combination is
+		// contradictory, not a case to guess at.
+		if newLocationID, ok := set["location_id"].(*int64); ok && newLocationID != nil {
+			writeError(w, http.StatusUnprocessableEntity, "a nested storage inherits its location from its root storage")
+			return
+		}
+		set["location_id"] = (*int64)(nil)
+	} else if newLocationID, ok := set["location_id"].(*int64); ok && newLocationID != nil {
+		// Assigning a location directly is only valid on a root storage.
+		// This request's own parent_id key (if present) reflects the
+		// *new* effective parent — e.g. "parent_id": null promoting this
+		// storage to root in the same request as assigning a location —
+		// so it takes precedence over the current DB value, which is only
+		// consulted when parent_id isn't part of this request at all.
+		effectiveParentID, hasParentKey := set["parent_id"].(*int64)
+		if !hasParentKey {
+			current, err := h.q.GetStorageByID(r.Context(), id)
+			if isNoRows(err) {
+				notFound(w, "storage")
+				return
+			}
+			if err != nil {
+				serverError(w, r, err)
+				return
+			}
+			effectiveParentID = current.ParentID
+		}
+		if effectiveParentID != nil {
+			writeError(w, http.StatusUnprocessableEntity, "a nested storage inherits its location from its root storage")
+			return
+		}
+
+		exists, err := h.q.LocationExists(r.Context(), *newLocationID)
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		if !exists {
+			writeError(w, http.StatusUnprocessableEntity, "location does not exist")
+			return
 		}
 	}
 
@@ -463,10 +541,45 @@ func (h *StoragesHandler) delete(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Deleting a root storage that has a location assigned must
+		// propagate that location onto any direct children it promotes to
+		// root — without this, those children would silently become
+		// unassigned instead of keeping the property they were nested
+		// inside of. Only ever relevant here (storage.ParentID == nil): a
+		// nested storage can never itself carry a location (CHECK
+		// constraint, migration 000005), so a non-root storage's
+		// LocationID is always nil. childIDs must be captured *before*
+		// DeleteStorage runs (their parent_id is about to change), but
+		// SetLocationForStorages must run *after* it — setting location_id
+		// on a storage that still has a non-null parent_id (true until the
+		// FK's ON DELETE SET NULL actually fires) trips
+		// storages_location_only_on_root itself, turning what should be an
+		// internal propagation step into a spurious 500.
+		var promotedChildIDs []int64
+		if storage.ParentID == nil && storage.LocationID != nil {
+			var err error
+			promotedChildIDs, err = q.DirectChildStorageIDs(r.Context(), &id)
+			if err != nil {
+				return err
+			}
+		}
+
 		// Same transaction as the promote-or-delete-items branch above — if
 		// this fails, the items move/delete above rolls back with it instead
 		// of being left committed with the storage still sitting there.
-		return q.DeleteStorage(r.Context(), id)
+		if err := q.DeleteStorage(r.Context(), id); err != nil {
+			return err
+		}
+
+		if len(promotedChildIDs) > 0 {
+			if err := q.SetLocationForStorages(r.Context(), store.SetLocationForStoragesParams{
+				LocationID: *storage.LocationID,
+				Ids:        promotedChildIDs,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 
 	if errors.Is(err, errHandled) {

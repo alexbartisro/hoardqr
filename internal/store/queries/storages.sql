@@ -1,5 +1,14 @@
 -- name: GetStoragesByParent :many
-SELECT * FROM storages WHERE parent_id IS NOT DISTINCT FROM sqlc.narg('parent_id') ORDER BY name;
+-- location_name is only ever non-null on a root row (location_id itself is
+-- CHECK-constrained to root-only — see migration 000005) — the LEFT JOIN
+-- costs nothing extra for a nested row, which just gets a null. Used by the
+-- /storages browse page to group root storages by location without a
+-- second round trip per row.
+SELECT s.*, loc.name AS location_name
+FROM storages s
+LEFT JOIN locations loc ON loc.id = s.location_id
+WHERE s.parent_id IS NOT DISTINCT FROM sqlc.narg('parent_id')
+ORDER BY s.name;
 
 -- name: GetStorageByID :one
 SELECT * FROM storages WHERE id = $1;
@@ -19,15 +28,43 @@ SELECT EXISTS(SELECT 1 FROM storages WHERE id = $1);
 -- (internal/api/storages.go) — this is just a backstop for rows that
 -- predate that check or were edited directly, and it bounds recursion to at
 -- most one pass over all storages regardless.
+--
+-- Extended (migration 000005) to also resolve the assigned Location, if
+-- any: `root` picks off the terminal (highest-depth) row's location_id —
+-- ORDER BY depth DESC LIMIT 1 rather than WHERE parent_id IS NULL so a
+-- corrupted cyclic chain degrades gracefully (no root row -> NULL via the
+-- LEFT JOIN, not a crash) instead of finding no row at all. Every returned
+-- row carries the same location_id/location_name (from the one root), which
+-- is redundant but simplest — callers just read it off any row (rows[0]).
 WITH RECURSIVE path AS (
-    SELECT s0.id, s0.parent_id, s0.name, 1 AS depth, ARRAY[s0.id] AS visited
+    SELECT s0.id, s0.parent_id, s0.name, s0.location_id, 1 AS depth, ARRAY[s0.id] AS visited
     FROM storages s0 WHERE s0.id = $1
     UNION ALL
-    SELECT s.id, s.parent_id, s.name, p.depth + 1, p.visited || s.id
+    SELECT s.id, s.parent_id, s.name, s.location_id, p.depth + 1, p.visited || s.id
     FROM storages s JOIN path p ON s.id = p.parent_id
     WHERE NOT (s.id = ANY(p.visited))
+),
+root AS (
+    SELECT location_id FROM path ORDER BY depth DESC LIMIT 1
 )
-SELECT path.id, path.name FROM path ORDER BY depth DESC;
+SELECT path.id, path.name, loc.id AS location_id, loc.name AS location_name
+FROM path
+LEFT JOIN root ON true
+LEFT JOIN locations loc ON loc.id = root.location_id
+ORDER BY path.depth DESC;
+
+-- name: DirectChildStorageIDs :many
+-- Only immediate children (unlike DescendantStorageIDs, which recurses) —
+-- used by the delete handler to know which storages are about to be
+-- promoted to root by the FK's ON DELETE SET NULL, so their (now-orphaned)
+-- location can be propagated from the deleted root storage onto them in the
+-- same transaction. Grandchildren stay nested under the promoted children
+-- and don't need this — they inherit the location transitively through
+-- StorageBreadcrumb's root walk either way.
+SELECT id FROM storages WHERE parent_id = $1;
+
+-- name: SetLocationForStorages :exec
+UPDATE storages SET location_id = sqlc.arg(location_id)::bigint WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 
 -- name: DescendantStorageIDs :many
 -- Includes the root id itself. Same visited-array cycle-detection insurance
@@ -42,8 +79,8 @@ WITH RECURSIVE descendants AS (
 SELECT descendants.id FROM descendants;
 
 -- name: InsertStorage :one
-INSERT INTO storages (parent_id, owner_id, is_shared, name, qr_token, photo_url, notes)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO storages (parent_id, owner_id, is_shared, name, qr_token, photo_url, notes, location_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- Storage PATCH (rename, move, edit code, toggle is_shared — §9) is hand-written

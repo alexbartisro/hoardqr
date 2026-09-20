@@ -83,6 +83,26 @@ func (h *ItemsHandler) list(w http.ResponseWriter, r *http.Request) {
 // it, a client-supplied pageSize had no ceiling at all.
 const maxRecentItemsPageSize = 100
 
+// deepestFirstBreadcrumb builds listRecent's deepest-storage-first string
+// (opposite of every other breadcrumb in the app — see CLAUDE.md) from a
+// StorageBreadcrumb result, appending an assigned Location at the very end
+// (the opposite end from breadcrumbText's root-first prepend in
+// search.go/mcpserver/resolve.go) since a location is logically "further
+// out" than even the root storage. Extracted as its own function so it's
+// unit-testable directly against a fabricated crumb, rather than only via
+// an HTTP round trip against whatever else happens to be in the database —
+// see TestDeepestFirstBreadcrumb in items_test.go.
+func deepestFirstBreadcrumb(crumb []store.StorageBreadcrumbRow) string {
+	names := make([]string, len(crumb))
+	for j, c := range crumb {
+		names[len(crumb)-1-j] = c.Name
+	}
+	if len(crumb) > 0 && crumb[0].LocationName != nil {
+		names = append(names, *crumb[0].LocationName)
+	}
+	return strings.Join(names, " > ")
+}
+
 func (h *ItemsHandler) listRecent(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page := int64(1)
@@ -134,16 +154,15 @@ func (h *ItemsHandler) listRecent(w http.ResponseWriter, r *http.Request) {
 		// Deepest-storage-first (opposite of every other breadcrumb in the
 		// app) — deliberate, see CLAUDE.md: for a scan-down-the-list glance,
 		// the immediate storage is the more useful headline than the root.
+		// A location, if assigned, is logically "further out" than the
+		// root storage, so it appends at the very end here rather than
+		// prepending like every other (root-first) breadcrumb in the app.
 		crumb, err := h.q.StorageBreadcrumb(r.Context(), row.StorageID)
 		if err != nil {
 			serverError(w, r, err)
 			return
 		}
-		names := make([]string, len(crumb))
-		for j, c := range crumb {
-			names[len(crumb)-1-j] = c.Name
-		}
-		entries[i] = entry{Item: toItemDTOFromRecentRow(row), Breadcrumb: strings.Join(names, " > ")}
+		entries[i] = entry{Item: toItemDTOFromRecentRow(row), Breadcrumb: deepestFirstBreadcrumb(crumb)}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "total": total})
 }
@@ -169,13 +188,11 @@ func (h *ItemsHandler) get(w http.ResponseWriter, r *http.Request) {
 		serverError(w, r, err)
 		return
 	}
-	breadcrumb := make([]BreadcrumbEntryDTO, len(breadcrumbRows))
-	for i, b := range breadcrumbRows {
-		breadcrumb[i] = BreadcrumbEntryDTO{ID: b.ID, Name: b.Name}
-	}
+	breadcrumb, location := breadcrumbAndLocation(breadcrumbRows)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"item":       toItemDTOFromGetRow(row),
 		"breadcrumb": breadcrumb,
+		"location":   location,
 	})
 }
 

@@ -26,19 +26,29 @@ type StorageDTO struct {
 	PhotoURL  *string `json:"photo_url"`
 	Notes     *string `json:"notes"`
 	CreatedAt string  `json:"created_at"`
+	// LocationID is a real column (migration 000005) and always present —
+	// non-nil only on a root storage (CHECK-enforced). LocationName is only
+	// ever populated when converting from a query that actually joined
+	// locations (GetStoragesByParentRow) — omitted, not sent as null, from
+	// every other conversion (get/create/update/delete all return a plain
+	// store.Storage with no join), so callers can't mistake "not fetched"
+	// for "no location assigned".
+	LocationID   *int64  `json:"location_id"`
+	LocationName *string `json:"location_name,omitempty"`
 }
 
 func toStorageDTO(s store.Storage) StorageDTO {
 	return StorageDTO{
-		ID:        s.ID,
-		ParentID:  s.ParentID,
-		OwnerID:   s.OwnerID,
-		IsShared:  s.IsShared,
-		Name:      s.Name,
-		QrToken:   s.QrToken,
-		PhotoURL:  s.PhotoUrl,
-		Notes:     s.Notes,
-		CreatedAt: timestamptzToString(s.CreatedAt),
+		ID:         s.ID,
+		ParentID:   s.ParentID,
+		OwnerID:    s.OwnerID,
+		IsShared:   s.IsShared,
+		Name:       s.Name,
+		QrToken:    s.QrToken,
+		PhotoURL:   s.PhotoUrl,
+		Notes:      s.Notes,
+		CreatedAt:  timestamptzToString(s.CreatedAt),
+		LocationID: s.LocationID,
 	}
 }
 
@@ -50,9 +60,84 @@ func toStorageDTOs(ss []store.Storage) []StorageDTO {
 	return out
 }
 
+// toStorageDTOFromListRow is GetStoragesByParent's row shape — the only
+// query that joins locations to also carry location_name.
+func toStorageDTOFromListRow(r store.GetStoragesByParentRow) StorageDTO {
+	dto := toStorageDTO(store.Storage{
+		ID: r.ID, ParentID: r.ParentID, OwnerID: r.OwnerID, IsShared: r.IsShared,
+		Name: r.Name, QrToken: r.QrToken, PhotoUrl: r.PhotoUrl, Notes: r.Notes,
+		CreatedAt: r.CreatedAt, LocationID: r.LocationID,
+	})
+	dto.LocationName = r.LocationName
+	return dto
+}
+
+func toStorageDTOsFromListRows(rs []store.GetStoragesByParentRow) []StorageDTO {
+	out := make([]StorageDTO, len(rs))
+	for i, r := range rs {
+		out[i] = toStorageDTOFromListRow(r)
+	}
+	return out
+}
+
 type BreadcrumbEntryDTO struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
+}
+
+// LocationRefDTO is the sibling "location" envelope key on a storage/item
+// detail response — deliberately not part of Breadcrumb itself (the
+// frontend builds storage links from that array's ids; a location id there
+// would produce a broken or wrong link) and deliberately not embedded in
+// StorageDTO/ItemDTO either, since it's the *resolved* location (walked up
+// to the root ancestor for a nested storage), not a raw column on the row
+// being returned.
+type LocationDTO struct {
+	ID        int64  `json:"id"`
+	OwnerID   *int64 `json:"owner_id"`
+	IsShared  bool   `json:"is_shared"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
+}
+
+func toLocationDTO(l store.Location) LocationDTO {
+	return LocationDTO{
+		ID:        l.ID,
+		OwnerID:   l.OwnerID,
+		IsShared:  l.IsShared,
+		Name:      l.Name,
+		CreatedAt: timestamptzToString(l.CreatedAt),
+	}
+}
+
+func toLocationDTOs(ls []store.Location) []LocationDTO {
+	out := make([]LocationDTO, len(ls))
+	for i, l := range ls {
+		out[i] = toLocationDTO(l)
+	}
+	return out
+}
+
+type LocationRefDTO struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// breadcrumbAndLocation splits a StorageBreadcrumb result into the plain
+// root-to-leaf array every caller already used, plus the resolved location
+// (if any) carried redundantly on every row by the query — see
+// storages.sql's StorageBreadcrumb comment. rows is never empty for a
+// storage that exists (it always includes the storage itself).
+func breadcrumbAndLocation(rows []store.StorageBreadcrumbRow) ([]BreadcrumbEntryDTO, *LocationRefDTO) {
+	breadcrumb := make([]BreadcrumbEntryDTO, len(rows))
+	for i, row := range rows {
+		breadcrumb[i] = BreadcrumbEntryDTO{ID: row.ID, Name: row.Name}
+	}
+	var location *LocationRefDTO
+	if len(rows) > 0 && rows[0].LocationID != nil {
+		location = &LocationRefDTO{ID: *rows[0].LocationID, Name: *rows[0].LocationName}
+	}
+	return breadcrumb, location
 }
 
 type ItemDTO struct {

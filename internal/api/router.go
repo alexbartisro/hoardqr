@@ -28,6 +28,7 @@ func NewRouter(pool *pgxpool.Pool, uploadDir string) chi.Router {
 	r.Get("/healthz", HealthzHandler(pool))
 
 	r.Route("/api/storages", NewStoragesHandler(pool).Routes)
+	r.Route("/api/locations", NewLocationsHandler(pool).Routes)
 	r.Route("/api/items", NewItemsHandler(pool).Routes)
 	r.Route("/api/tags", NewTagsHandler(pool).Routes)
 	r.Route("/api/photos", NewPhotosHandler(uploadDir).Routes)

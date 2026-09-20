@@ -91,7 +91,7 @@ func (q *Queries) FindItemsByNormalizedCode(ctx context.Context, code string) ([
 }
 
 const findStorageByNormalizedCode = `-- name: FindStorageByNormalizedCode :one
-SELECT id, parent_id, owner_id, is_shared, name, qr_token, photo_url, notes, created_at FROM storages
+SELECT id, parent_id, owner_id, is_shared, name, qr_token, photo_url, notes, created_at, location_id FROM storages
 WHERE TRANSLATE(UPPER(qr_token), 'OIL', '011') = TRANSLATE(UPPER($1::text), 'OIL', '011')
 `
 
@@ -108,6 +108,7 @@ func (q *Queries) FindStorageByNormalizedCode(ctx context.Context, code string) 
 		&i.PhotoUrl,
 		&i.Notes,
 		&i.CreatedAt,
+		&i.LocationID,
 	)
 	return i, err
 }

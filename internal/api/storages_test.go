@@ -368,3 +368,207 @@ func TestStorageUpdateRejectsNonexistentParent(t *testing.T) {
 		t.Fatalf("expected 422 for a nonexistent parent_id, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestStorageCreateWithLocation proves a root storage can be created with a
+// location assigned directly, and TestStorageCreateWithParentAndLocationRejected
+// proves the two are mutually exclusive at create time (migration 000005's
+// storages_location_only_on_root, pre-checked for a clean 422 rather than a
+// raw 23514).
+func TestStorageCreateWithLocation(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	location, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "LOCTEST Create Root House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, location.ID) })
+
+	body := fmt.Sprintf(`{"name": "LOCTEST Root With Location", "location_id": %d}`, location.ID)
+	req := httptest.NewRequest(http.MethodPost, "/api/storages", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got StorageDTO
+	decodeJSON(t, rec, &got)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, got.ID) })
+	if got.LocationID == nil || *got.LocationID != location.ID {
+		t.Fatalf("expected location_id %d on the created storage, got %+v", location.ID, got)
+	}
+}
+
+func TestStorageCreateWithParentAndLocationRejected(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	parent, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST parent for rejection", QrToken: "LOCREJECT-PARENT", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, parent.ID) })
+
+	location, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "LOCTEST Reject Combo House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, location.ID) })
+
+	body := fmt.Sprintf(`{"name": "LOCTEST nested with location", "parent_id": %d, "location_id": %d}`, parent.ID, location.ID)
+	req := httptest.NewRequest(http.MethodPost, "/api/storages", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 for parent_id+location_id together, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestStorageUpdateAddingParentClearsLocation proves the silent-loss path
+// design decision 1 calls out explicitly: PATCHing a non-nil parent_id onto
+// a storage that currently has a location must clear location_id in the
+// same UPDATE, not surface a raw check-violation.
+func TestStorageUpdateAddingParentClearsLocation(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	location, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "LOCTEST Clear-On-Nest House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, location.ID) })
+
+	newParent, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST new parent", QrToken: "LOCCLEAR-PARENT", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, newParent.ID) })
+
+	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST about to be nested", QrToken: "LOCCLEAR-STORAGE", IsShared: true, LocationID: &location.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, storage.ID) })
+
+	body := fmt.Sprintf(`{"parent_id": %d}`, newParent.ID)
+	req := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/api/storages/%d", storage.ID), strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	got, err := q.GetStorageByID(ctx, storage.ID)
+	if err != nil {
+		t.Fatalf("GetStorageByID: %v", err)
+	}
+	if got.LocationID != nil {
+		t.Fatalf("expected location_id to be cleared once nested under a parent, got %v", got.LocationID)
+	}
+}
+
+// TestStorageDeletePropagatesLocationToPromotedChildren is the silent-loss
+// path design decision 1 also calls out: deleting a root storage that has a
+// location assigned must carry that location onto any direct children it
+// promotes to root (the FK's ON DELETE SET NULL fires as part of the
+// delete) — otherwise they'd silently become unassigned.
+func TestStorageDeletePropagatesLocationToPromotedChildren(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	location, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "LOCTEST Propagate House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, location.ID) })
+
+	root, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST root to delete", QrToken: "LOCPROP-ROOT", IsShared: true, LocationID: &location.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	// Deleting root.ID is this test's own subject, not incidental cleanup —
+	// but a t.Fatalf anywhere between here and the DELETE request below
+	// would otherwise leave this row behind with a fixed qr_token, failing
+	// the *next* run with a misleading duplicate-key error instead of
+	// whatever actually broke. Deleting an already-deleted row is a
+	// harmless no-op.
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, root.ID) })
+
+	child, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST child to be promoted", QrToken: "LOCPROP-CHILD", IsShared: true, ParentID: &root.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage child: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, child.ID) })
+
+	req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/storages/%d", root.ID), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	got, err := q.GetStorageByID(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetStorageByID: %v", err)
+	}
+	if got.ParentID != nil {
+		t.Fatalf("expected the child to be promoted to root, still has parent_id %v", got.ParentID)
+	}
+	if got.LocationID == nil || *got.LocationID != location.ID {
+		t.Fatalf("expected the promoted child to inherit the deleted root's location %d, got %v", location.ID, got.LocationID)
+	}
+}
+
+// TestStorageLocationCheckConstraintRejectsBothColumns proves the CHECK
+// constraint itself (migration 000005's storages_location_only_on_root),
+// not just the handler's pre-checks — a raw insert bypassing the API must
+// still be rejected by Postgres.
+func TestStorageLocationCheckConstraintRejectsBothColumns(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	location, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "LOCTEST Constraint House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, location.ID) })
+
+	parent, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST constraint parent", QrToken: "LOCCONSTRAINT-PARENT", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, parent.ID) })
+
+	_, err = pool.Exec(ctx,
+		`INSERT INTO storages (parent_id, location_id, is_shared, name, qr_token) VALUES ($1, $2, true, 'LOCTEST should be rejected', 'LOCCONSTRAINT-BAD')`,
+		parent.ID, location.ID,
+	)
+	if err == nil {
+		_, _ = pool.Exec(ctx, `DELETE FROM storages WHERE qr_token = 'LOCCONSTRAINT-BAD'`)
+		t.Fatal("expected the CHECK constraint to reject parent_id and location_id both set, got no error")
+	}
+	if !strings.Contains(err.Error(), "storages_location_only_on_root") {
+		t.Fatalf("expected the storages_location_only_on_root constraint to fire, got: %v", err)
+	}
+}

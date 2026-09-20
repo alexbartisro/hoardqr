@@ -42,16 +42,25 @@ type ItemTag struct {
 	TagID  int64
 }
 
-type Storage struct {
+type Location struct {
 	ID        int64
-	ParentID  *int64
 	OwnerID   *int64
 	IsShared  bool
 	Name      string
-	QrToken   string
-	PhotoUrl  *string
-	Notes     *string
 	CreatedAt pgtype.Timestamptz
+}
+
+type Storage struct {
+	ID         int64
+	ParentID   *int64
+	OwnerID    *int64
+	IsShared   bool
+	Name       string
+	QrToken    string
+	PhotoUrl   *string
+	Notes      *string
+	CreatedAt  pgtype.Timestamptz
+	LocationID *int64
 }
 
 type Tag struct {

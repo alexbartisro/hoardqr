@@ -62,9 +62,15 @@ func (h *SearchHandler) breadcrumbText(ctx context.Context, storageID int64) (st
 	if err != nil {
 		return "", err
 	}
-	names := make([]string, len(crumb))
-	for i, c := range crumb {
-		names[i] = c.Name
+	names := make([]string, 0, len(crumb)+1)
+	// Root-first, so a location (further out than even the root storage)
+	// prepends rather than appends — the opposite end from listRecent's
+	// deepest-first breadcrumb, which appends it instead.
+	if len(crumb) > 0 && crumb[0].LocationName != nil {
+		names = append(names, *crumb[0].LocationName)
+	}
+	for _, c := range crumb {
+		names = append(names, c.Name)
 	}
 	return strings.Join(names, " > "), nil
 }

@@ -467,3 +467,133 @@ func TestItemCreateRejectsPurchasePriceOutOfRange(t *testing.T) {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestItemGetIncludesLocationWhenAssigned and its Omitted counterpart prove
+// GET /api/items/:id's sibling "location" envelope key (added alongside
+// GET /api/storages/:id and /contents — see internal/api/dto.go's
+// breadcrumbAndLocation) resolves to the item's storage's root ancestor's
+// assigned Location, or an explicit null, never a missing key either way.
+func TestItemGetIncludesLocationWhenAssigned(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	location, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "LOCTEST Item Envelope House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, location.ID) })
+
+	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST item envelope root", QrToken: "LOCENV-ROOT", IsShared: true, LocationID: &location.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, storage.ID) })
+
+	item, err := q.InsertItem(ctx, store.InsertItemParams{
+		StorageID: storage.ID, Name: "LOCTEST envelope item", QrToken: "LOCENV-ITEM",
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID) })
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/items/%d", item.ID), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Location *LocationRefDTO `json:"location"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if got.Location == nil || got.Location.ID != location.ID || got.Location.Name != "LOCTEST Item Envelope House" {
+		t.Fatalf("expected the location envelope key to resolve, got %+v", got.Location)
+	}
+}
+
+func TestItemGetOmitsLocationWhenUnassigned(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST item envelope unassigned root", QrToken: "LOCENV-UNASSIGNED-ROOT", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, storage.ID) })
+
+	item, err := q.InsertItem(ctx, store.InsertItemParams{
+		StorageID: storage.ID, Name: "LOCTEST unassigned envelope item", QrToken: "LOCENV-UNASSIGNED-ITEM",
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID) })
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/items/%d", item.ID), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Location *LocationRefDTO `json:"location"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if got.Location != nil {
+		t.Fatalf("expected a null location for an unassigned storage, got %+v", got.Location)
+	}
+}
+
+// TestDeepestFirstBreadcrumb exercises listRecent's breadcrumb-building
+// logic directly against a fabricated StorageBreadcrumb result, rather than
+// through an HTTP round trip against listRecent's unfiltered "everything in
+// the database, newest first" feed — asserting against a specific item's
+// position/presence there would be order-dependent on however much other
+// data already exists (a real risk on a shared dev database, not just a
+// theoretical one). Proves both the deepest-first reversal (opposite of
+// every other breadcrumb in the app) and that an assigned Location appends
+// at the very end (the opposite end from breadcrumbText's root-first
+// prepend — see TestSuggestBreadcrumbPrependsLocationWhenAssigned in
+// search_test.go), since a location is logically "further out" than even
+// the root storage.
+func TestDeepestFirstBreadcrumb(t *testing.T) {
+	locationID := int64(1)
+	locationName := "LOCTEST Recent House"
+
+	withLocation := []store.StorageBreadcrumbRow{
+		{ID: 1, Name: "LOCTEST Recent Balcony", LocationID: &locationID, LocationName: &locationName},
+		{ID: 2, Name: "Storage Cabinet", LocationID: &locationID, LocationName: &locationName},
+		{ID: 3, Name: "Box 4", LocationID: &locationID, LocationName: &locationName},
+	}
+	if got, want := deepestFirstBreadcrumb(withLocation), "Box 4 > Storage Cabinet > LOCTEST Recent Balcony > LOCTEST Recent House"; got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+
+	withoutLocation := []store.StorageBreadcrumbRow{
+		{ID: 1, Name: "Unassigned Balcony"},
+		{ID: 2, Name: "Storage Cabinet"},
+	}
+	if got, want := deepestFirstBreadcrumb(withoutLocation), "Storage Cabinet > Unassigned Balcony"; got != want {
+		t.Fatalf("expected no trailing location for an unassigned root, got %q (want %q)", got, want)
+	}
+
+	singleRow := []store.StorageBreadcrumbRow{{ID: 1, Name: "Root Only"}}
+	if got, want := deepestFirstBreadcrumb(singleRow), "Root Only"; got != want {
+		t.Fatalf("expected %q for a root-level item, got %q", want, got)
+	}
+}

@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"hoardqr/internal/store"
@@ -160,5 +163,113 @@ func TestSearchSuggestEscapesLikeMetacharacters(t *testing.T) {
 	}
 	if foundDecoy {
 		t.Fatalf("'%%' should not act as a wildcard matching '50X ...' when searching for the literal '50%%', got %+v", rows)
+	}
+}
+
+// TestSuggestBreadcrumbPrependsLocationWhenAssigned proves breadcrumbText
+// prepends an assigned Location ahead of the root storage — "House >
+// Balcony > ..." — the opposite end from listRecent's deepest-first
+// breadcrumb, which appends it instead (see TestRecentItemsBreadcrumb*
+// below). TestSuggestBreadcrumbOmitsLocationWhenUnassigned proves the
+// unassigned case doesn't leave a stray leading "> ".
+func TestSuggestBreadcrumbPrependsLocationWhenAssigned(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	location, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "LOCTEST Breadcrumb House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, location.ID) })
+
+	root, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST BreadcrumbBalcony", QrToken: "LOCBREAD-ROOT", IsShared: true, LocationID: &location.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, root.ID) })
+
+	item, err := q.InsertItem(ctx, store.InsertItemParams{
+		StorageID: root.ID, Name: "LOCTEST Breadcrumb Item", QrToken: "LOCBREAD-ITEM",
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID) })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/search/suggest?q=LOCTEST+Breadcrumb+Item", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var suggestions []SearchSuggestionDTO
+	if err := json.NewDecoder(rec.Body).Decode(&suggestions); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	var found bool
+	for _, s := range suggestions {
+		if s.Kind == "item" && s.ID == item.ID {
+			found = true
+			want := "LOCTEST Breadcrumb House > LOCTEST BreadcrumbBalcony"
+			if s.Breadcrumb == nil || *s.Breadcrumb != want {
+				t.Fatalf("expected breadcrumb %q, got %v", want, s.Breadcrumb)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected to find the test item in suggestions, got %+v", suggestions)
+	}
+}
+
+func TestSuggestBreadcrumbOmitsLocationWhenUnassigned(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	root, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST UnassignedBalcony", QrToken: "LOCBREAD-UNASSIGNED-ROOT", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, root.ID) })
+
+	item, err := q.InsertItem(ctx, store.InsertItemParams{
+		StorageID: root.ID, Name: "LOCTEST Unassigned Item", QrToken: "LOCBREAD-UNASSIGNED-ITEM",
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID) })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/search/suggest?q=LOCTEST+Unassigned+Item", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var suggestions []SearchSuggestionDTO
+	if err := json.NewDecoder(rec.Body).Decode(&suggestions); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	var found bool
+	for _, s := range suggestions {
+		if s.Kind == "item" && s.ID == item.ID {
+			found = true
+			want := "LOCTEST UnassignedBalcony"
+			if s.Breadcrumb == nil || *s.Breadcrumb != want {
+				t.Fatalf("expected breadcrumb %q with no leading location, got %v", want, s.Breadcrumb)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected to find the test item in suggestions, got %+v", suggestions)
 	}
 }
