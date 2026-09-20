@@ -1,14 +1,19 @@
-// Package mcpserver implements the six MCP tools from architecture plan
-// §11, as the `hoardqr mcp` run mode's tool set. Named mcpserver (not mcp)
-// specifically to avoid colliding with the imported
+// Package mcpserver implements the seven MCP tools from architecture plan
+// §11 (six) plus list_locations (added alongside add_storage's optional
+// location param — see CLAUDE.md's Locations design-decision notes), as the
+// `hoardqr mcp` run mode's tool set. Named mcpserver (not mcp) specifically
+// to avoid colliding with the imported
 // github.com/modelcontextprotocol/go-sdk/mcp package, which every file here
 // also imports as mcp.
 package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"hoardqr/internal/store"
 )
@@ -80,6 +85,41 @@ func resolveStorage(ctx context.Context, q *store.Queries, name string) (id int6
 	}
 
 	return candidates[0].ID, candidates[0].Name, nil
+}
+
+// resolveLocation finds a Location by exact, case-insensitive name —
+// locations are deliberately not fuzzy-searchable (kept out of SearchSuggest
+// on purpose, see CLAUDE.md: no codes, a handful of rows, and adding them
+// would crowd the shared top-10 the same way already fixed once for
+// storages/items/tags), so there's no tie-detection here the way
+// resolveStorage/resolveItem need. An unmatched name enumerates every real
+// Location (there are at most a handful) so an LLM caller can self-correct
+// in one turn rather than guessing blind a second time.
+func resolveLocation(ctx context.Context, q *store.Queries, name string) (id int64, matchedName string, err error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return 0, "", toolErrorf("location name is required")
+	}
+	loc, err := q.FindLocationByName(ctx, trimmed)
+	if err == nil {
+		return loc.ID, loc.Name, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", err
+	}
+
+	locations, listErr := q.ListLocations(ctx)
+	if listErr != nil {
+		return 0, "", listErr
+	}
+	if len(locations) == 0 {
+		return 0, "", toolErrorf("no location matching %q found — no locations exist yet (use list_locations to check)", trimmed)
+	}
+	names := make([]string, len(locations))
+	for i, l := range locations {
+		names[i] = l.Name
+	}
+	return 0, "", toolErrorf("no location matching %q found — existing locations: %s", trimmed, strings.Join(names, ", "))
 }
 
 // resolveItem is resolveStorage's item-side equivalent — also returns the

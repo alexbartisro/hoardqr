@@ -28,7 +28,7 @@ func registerTools(s *mcp.Server, pool *pgxpool.Pool) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_contents",
-		Description: "List everything stored in a storage, including everything nested inside its child storages.",
+		Description: "List everything stored in a storage (including everything nested inside its child storages), or everything across all of a Location's root-level storages combined. Provide exactly one of storage or location.",
 	}, listContentsHandler(q))
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -38,13 +38,18 @@ func registerTools(s *mcp.Server, pool *pgxpool.Pool) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "add_storage",
-		Description: "Create a new storage container (a box, shelf, cabinet, room, etc.), optionally nested inside an existing one.",
+		Description: "Create a new storage container (a box, shelf, cabinet, room, etc.), optionally nested inside an existing one, or optionally assigned to a Location (a physical property like a house or garage) if it's root-level.",
 	}, addStorageHandler(q))
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "move_item",
 		Description: "Move an existing item to a different storage.",
 	}, moveItemHandler(pool))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "list_locations",
+		Description: "List every Location — a flat, non-nested physical property (a house, garage, etc.) that a root-level storage can optionally belong to. Read-only; use this to see valid values before calling add_storage with a location.",
+	}, listLocationsHandler(q))
 }
 
 // --- find_items ---
@@ -163,7 +168,8 @@ func whereIsHandler(q *store.Queries) mcp.ToolHandlerFor[whereIsInput, whereIsOu
 // --- list_contents ---
 
 type listContentsInput struct {
-	Storage string `json:"storage" jsonschema:"the storage's name, or close to it"`
+	Storage  *string `json:"storage,omitempty" jsonschema:"a storage's name, or close to it — provide exactly one of storage or location"`
+	Location *string `json:"location,omitempty" jsonschema:"a Location's exact name (see list_locations) — lists everything across all of that Location's root-level storages combined; provide exactly one of storage or location"`
 }
 
 type contentItem struct {
@@ -173,14 +179,26 @@ type contentItem struct {
 }
 
 type listContentsOutput struct {
-	Storage string        `json:"storage" jsonschema:"the matched storage's actual name"`
-	Path    string        `json:"path" jsonschema:"breadcrumb path from root to this storage"`
-	Items   []contentItem `json:"items" jsonschema:"every item stored here or in any storage nested inside it"`
+	Storage  *string       `json:"storage,omitempty" jsonschema:"the matched storage's actual name, present when a storage was queried"`
+	Location *string       `json:"location,omitempty" jsonschema:"the matched Location's actual name, present when a location was queried"`
+	Path     string        `json:"path" jsonschema:"breadcrumb path from root to this storage, or the Location's own name when a location was queried"`
+	Items    []contentItem `json:"items" jsonschema:"every item stored here (or, for a location, across all its root storages) or in anything nested inside"`
 }
 
 func listContentsHandler(q *store.Queries) mcp.ToolHandlerFor[listContentsInput, listContentsOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in listContentsInput) (*mcp.CallToolResult, listContentsOutput, error) {
-		storageID, matchedName, err := resolveStorage(ctx, q, in.Storage)
+		if in.Storage == nil && in.Location == nil {
+			return nil, listContentsOutput{}, toolErrorf("provide either storage or location")
+		}
+		if in.Storage != nil && in.Location != nil {
+			return nil, listContentsOutput{}, toolErrorf("provide only one of storage or location, not both")
+		}
+
+		if in.Location != nil {
+			return listLocationContents(ctx, q, *in.Location)
+		}
+
+		storageID, matchedName, err := resolveStorage(ctx, q, *in.Storage)
 		if err != nil {
 			return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
 		}
@@ -196,12 +214,50 @@ func listContentsHandler(q *store.Queries) mcp.ToolHandlerFor[listContentsInput,
 		if err != nil {
 			return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
 		}
-		out := listContentsOutput{Storage: matchedName, Path: path, Items: []contentItem{}}
+		out := listContentsOutput{Storage: &matchedName, Path: path, Items: []contentItem{}}
 		for _, row := range rows {
 			out.Items = append(out.Items, contentItem{ID: row.ID, Name: row.Name, Quantity: row.Quantity})
 		}
 		return nil, out, nil
 	}
+}
+
+// listLocationContents is list_contents' location-query branch, split out
+// since it fans out over every root storage assigned to the Location
+// (there's no single storage_id to resolve a breadcrumb from the way the
+// plain-storage branch has) rather than resolving one storage and its
+// descendants.
+func listLocationContents(ctx context.Context, q *store.Queries, location string) (*mcp.CallToolResult, listContentsOutput, error) {
+	locationID, matchedLocation, err := resolveLocation(ctx, q, location)
+	if err != nil {
+		return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
+	}
+	roots, err := q.ListStoragesAtLocation(ctx, &locationID)
+	if err != nil {
+		return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
+	}
+
+	out := listContentsOutput{Location: &matchedLocation, Path: matchedLocation, Items: []contentItem{}}
+	if len(roots) == 0 {
+		return nil, out, nil
+	}
+
+	var allIDs []int64
+	for _, root := range roots {
+		descendantIDs, err := q.DescendantStorageIDs(ctx, root.ID)
+		if err != nil {
+			return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
+		}
+		allIDs = append(allIDs, descendantIDs...)
+	}
+	rows, err := q.ListItemsByStorageIDs(ctx, allIDs)
+	if err != nil {
+		return nil, listContentsOutput{}, sanitizeToolError(ctx, "list_contents", err)
+	}
+	for _, row := range rows {
+		out.Items = append(out.Items, contentItem{ID: row.ID, Name: row.Name, Quantity: row.Quantity})
+	}
+	return nil, out, nil
 }
 
 // --- add_item ---
@@ -255,14 +311,15 @@ func addItemHandler(q *store.Queries) mcp.ToolHandlerFor[addItemInput, addItemOu
 // --- add_storage ---
 
 type addStorageInput struct {
-	Name   string  `json:"name" jsonschema:"the new storage's name"`
-	Parent *string `json:"parent,omitempty" jsonschema:"an existing storage to nest this inside; omit for a root-level storage"`
+	Name     string  `json:"name" jsonschema:"the new storage's name"`
+	Parent   *string `json:"parent,omitempty" jsonschema:"an existing storage to nest this inside; omit for a root-level storage"`
+	Location *string `json:"location,omitempty" jsonschema:"an existing Location (a physical property, e.g. a house or garage — see list_locations) this root-level storage belongs to; never combine with parent, since a nested storage always inherits its location from its root ancestor instead"`
 }
 
 type addStorageOutput struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
-	Path string `json:"path" jsonschema:"breadcrumb path from root, including the new storage itself"`
+	Path string `json:"path" jsonschema:"breadcrumb path from root, including the new storage itself, and its Location if it has one"`
 	Code string `json:"code" jsonschema:"the generated code, printable on a label for this storage"`
 }
 
@@ -276,6 +333,15 @@ func addStorageHandler(q *store.Queries) mcp.ToolHandlerFor[addStorageInput, add
 			return nil, addStorageOutput{}, toolErrorf("name is required")
 		}
 
+		// Mirrors internal/api/storages.go's create handler: a location is
+		// only meaningful on a root storage (storages_location_only_on_root,
+		// migration 000004) — reject the combination outright rather than
+		// silently picking one, the same "contradictory, not a case to guess
+		// at" reasoning as the REST handler's PATCH equivalent.
+		if in.Parent != nil && in.Location != nil {
+			return nil, addStorageOutput{}, toolErrorf("a nested storage inherits its location from its root storage — provide parent or location, not both")
+		}
+
 		var parentID *int64
 		if in.Parent != nil {
 			id, _, err := resolveStorage(ctx, q, *in.Parent)
@@ -285,6 +351,15 @@ func addStorageHandler(q *store.Queries) mcp.ToolHandlerFor[addStorageInput, add
 			parentID = &id
 		}
 
+		var locationID *int64
+		if in.Location != nil {
+			id, _, err := resolveLocation(ctx, q, *in.Location)
+			if err != nil {
+				return nil, addStorageOutput{}, sanitizeToolError(ctx, "add_storage", err)
+			}
+			locationID = &id
+		}
+
 		// Retries on a generated-code collision (architecture plan §4: "a
 		// non-event, not something to design around") — same reasoning as
 		// internal/api/storages.go's create handler.
@@ -292,10 +367,11 @@ func addStorageHandler(q *store.Queries) mcp.ToolHandlerFor[addStorageInput, add
 		for attempt := 0; ; attempt++ {
 			var err error
 			storage, err = q.InsertStorage(ctx, store.InsertStorageParams{
-				ParentID: parentID,
-				IsShared: true, // no auth yet — every row is public until then (see CLAUDE.md)
-				Name:     name,
-				QrToken:  codegen.PlainTextCode(),
+				ParentID:   parentID,
+				LocationID: locationID,
+				IsShared:   true, // no auth yet — every row is public until then (see CLAUDE.md)
+				Name:       name,
+				QrToken:    codegen.PlainTextCode(),
 			})
 			if err == nil {
 				break
@@ -305,11 +381,41 @@ func addStorageHandler(q *store.Queries) mcp.ToolHandlerFor[addStorageInput, add
 			}
 		}
 
+		// Already Location-prefixed for free when locationID is set —
+		// breadcrumbText resolves it via StorageBreadcrumb's root walk
+		// (migration 000004), no separate lookup needed here.
 		path, err := breadcrumbText(ctx, q, storage.ID)
 		if err != nil {
 			return nil, addStorageOutput{}, sanitizeToolError(ctx, "add_storage", err)
 		}
 		return nil, addStorageOutput{ID: storage.ID, Name: storage.Name, Path: path, Code: storage.QrToken}, nil
+	}
+}
+
+// --- list_locations ---
+
+type listLocationsInput struct{}
+
+type locationSummary struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+type listLocationsOutput struct {
+	Locations []locationSummary `json:"locations"`
+}
+
+func listLocationsHandler(q *store.Queries) mcp.ToolHandlerFor[listLocationsInput, listLocationsOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, _ listLocationsInput) (*mcp.CallToolResult, listLocationsOutput, error) {
+		locations, err := q.ListLocations(ctx)
+		if err != nil {
+			return nil, listLocationsOutput{}, sanitizeToolError(ctx, "list_locations", err)
+		}
+		out := listLocationsOutput{Locations: make([]locationSummary, len(locations))}
+		for i, l := range locations {
+			out.Locations[i] = locationSummary{ID: l.ID, Name: l.Name}
+		}
+		return nil, out, nil
 	}
 }
 

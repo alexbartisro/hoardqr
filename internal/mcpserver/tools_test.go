@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -203,6 +204,22 @@ func requireNoLeftoverTestRows(t *testing.T, pool *pgxpool.Pool) {
 	}
 	if count > 0 {
 		t.Fatalf("found %d leftover test storage(s) from a previous run's failed cleanup — clean up manually before re-running", count)
+	}
+
+	// Locations added alongside Milestone 3's list_locations/add_storage
+	// location param — every location test registers its own t.Cleanup, but
+	// this guard exists precisely for the case where one didn't run (an
+	// earlier t.Fatalf), so it needs to sweep locations too, not just
+	// storages.
+	var locationCount int
+	err = pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM locations WHERE name LIKE 'MCP Test %'`,
+	).Scan(&locationCount)
+	if err != nil {
+		t.Fatalf("checking for leftover test locations: %v", err)
+	}
+	if locationCount > 0 {
+		t.Fatalf("found %d leftover test location(s) from a previous run's failed cleanup — clean up manually before re-running", locationCount)
 	}
 }
 
@@ -791,4 +808,224 @@ func containsContentItem(items []contentItem, id int64, quantity int32) bool {
 		}
 	}
 	return false
+}
+
+// TestMCPToolsAddStorageWithLocation proves add_storage's optional location
+// param resolves and applies correctly, and that the returned path is
+// already Location-prefixed for free — breadcrumbText resolves it via
+// StorageBreadcrumb's root walk, no separate lookup needed in the handler.
+func TestMCPToolsAddStorageWithLocation(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	cs := testClient(t, pool)
+
+	location, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "MCP Test Location House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, location.ID) })
+
+	var root addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Location Balcony", "location": "MCP Test Location House"}, &root)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, root.ID) })
+
+	if root.Path != "MCP Test Location House > MCP Test Location Balcony" {
+		t.Fatalf("expected the Location-prefixed path, got %q", root.Path)
+	}
+
+	got, err := q.GetStorageByID(ctx, root.ID)
+	if err != nil {
+		t.Fatalf("GetStorageByID: %v", err)
+	}
+	if got.LocationID == nil || *got.LocationID != location.ID {
+		t.Fatalf("expected location_id %d on the created storage, got %v", location.ID, got.LocationID)
+	}
+}
+
+// TestMCPToolsAddStorageRejectsParentAndLocationTogether mirrors REST's
+// create-handler 422 (internal/api/storages_test.go's
+// TestStorageCreateWithParentAndLocationRejected) — the combination is
+// contradictory (a nested storage always inherits its location from its
+// root ancestor), so add_storage must refuse it rather than guess which one
+// wins.
+func TestMCPToolsAddStorageRejectsParentAndLocationTogether(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	cs := testClient(t, pool)
+
+	parent, err := q.InsertStorage(ctx, store.InsertStorageParams{Name: "MCP Test Combo Parent", QrToken: codegen.PlainTextCode(), IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, parent.ID) })
+
+	location, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "MCP Test Combo House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, location.ID) })
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "add_storage",
+		Arguments: map[string]any{
+			"name": "MCP Test Combo Child", "parent": "MCP Test Combo Parent", "location": "MCP Test Combo House",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected a tool error for parent+location together, got success: %s", textOf(t, res))
+	}
+}
+
+// TestMCPToolsAddStorageLocationNotFoundEnumeratesNames proves
+// resolveLocation's not-found error lists every real Location name, so an
+// LLM caller can self-correct in one turn rather than guessing blind again
+// — locations aren't fuzzy-searchable, so there's no "close match" to fall
+// back on the way resolveStorage/resolveItem have.
+func TestMCPToolsAddStorageLocationNotFoundEnumeratesNames(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	cs := testClient(t, pool)
+
+	location, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "MCP Test Enumerate House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, location.ID) })
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "add_storage",
+		Arguments: map[string]any{"name": "MCP Test Enumerate Storage", "location": "definitely-not-a-real-location-98765"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected a tool error for an unresolvable location, got success: %s", textOf(t, res))
+	}
+	text := textOf(t, res)
+	if !strings.Contains(text, "MCP Test Enumerate House") {
+		t.Fatalf("expected the not-found error to enumerate real location names, got: %q", text)
+	}
+}
+
+// TestMCPToolsListContentsByLocation proves list_contents' location branch
+// fans out across every root storage assigned to a Location — the "browse
+// by location" half of the user's explicit "everywhere" requirement that
+// add_storage's location param and list_locations alone don't cover. Two
+// root storages at the same Location, each with its own item and its own
+// nested child, must all surface in one call.
+func TestMCPToolsListContentsByLocation(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	cs := testClient(t, pool)
+
+	location, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "MCP Test Contents House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, location.ID) })
+
+	rootA, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "MCP Test Contents Root A", QrToken: codegen.PlainTextCode(), IsShared: true, LocationID: &location.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage rootA: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, rootA.ID) })
+
+	rootB, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "MCP Test Contents Root B", QrToken: codegen.PlainTextCode(), IsShared: true, LocationID: &location.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage rootB: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, rootB.ID) })
+
+	child, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "MCP Test Contents Child", QrToken: codegen.PlainTextCode(), IsShared: true, ParentID: &rootA.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage child: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, child.ID) })
+
+	itemInChild, err := q.InsertItem(ctx, store.InsertItemParams{
+		StorageID: child.ID, Name: "MCP Test Contents Item In Child", QrToken: codegen.PlainTextCode(),
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem itemInChild: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, itemInChild.ID) })
+
+	itemInRootB, err := q.InsertItem(ctx, store.InsertItemParams{
+		StorageID: rootB.ID, Name: "MCP Test Contents Item In Root B", QrToken: codegen.PlainTextCode(),
+		IsShared: true, Quantity: 2, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem itemInRootB: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, itemInRootB.ID) })
+
+	var out listContentsOutput
+	callTool(t, cs, "list_contents", map[string]any{"location": "MCP Test Contents House"}, &out)
+
+	if out.Location == nil || *out.Location != "MCP Test Contents House" {
+		t.Fatalf("expected the location field to resolve, got %+v", out.Location)
+	}
+	if !containsContentItem(out.Items, itemInChild.ID, 1) {
+		t.Fatalf("expected the item nested under root A's child to be included, got %+v", out.Items)
+	}
+	if !containsContentItem(out.Items, itemInRootB.ID, 2) {
+		t.Fatalf("expected root B's own item to be included, got %+v", out.Items)
+	}
+
+	// storage and location together must be rejected, not silently pick one.
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "list_contents",
+		Arguments: map[string]any{"storage": "MCP Test Contents Root A", "location": "MCP Test Contents House"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected a tool error for storage+location together, got success: %s", textOf(t, res))
+	}
+}
+
+// TestMCPToolsListLocations proves the read-only list_locations tool
+// surfaces real rows in name order (ListLocations' own ORDER BY).
+func TestMCPToolsListLocations(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	cs := testClient(t, pool)
+
+	for _, name := range []string{"MCP Test List Garage", "MCP Test List Apartment"} {
+		loc, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: name, IsShared: true})
+		if err != nil {
+			t.Fatalf("InsertLocation(%q): %v", name, err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID) })
+	}
+
+	var out listLocationsOutput
+	callTool(t, cs, "list_locations", map[string]any{}, &out)
+
+	var names []string
+	for _, l := range out.Locations {
+		if strings.HasPrefix(l.Name, "MCP Test List ") {
+			names = append(names, l.Name)
+		}
+	}
+	if len(names) != 2 || names[0] != "MCP Test List Apartment" || names[1] != "MCP Test List Garage" {
+		t.Fatalf("expected [MCP Test List Apartment, MCP Test List Garage] in that order, got %v", names)
+	}
 }
