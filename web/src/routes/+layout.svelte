@@ -25,7 +25,16 @@
 	// reached from and conceptually part of that section, not the dashboard.
 	const tabs = [
 		{ href: '/', label: 'Home', icon: House, active: () => page.url.pathname === '/' },
-		{ href: '/storages', label: 'Storage', icon: Boxes, active: () => page.url.pathname.startsWith('/storages') },
+		{
+			href: '/storages',
+			label: 'Storage',
+			icon: Boxes,
+			// /locations (manage Locations) is reached from and conceptually
+			// part of the Storage section too — same startsWith-not-exact-match
+			// rationale as Storage/Objects already using it for /storages/42
+			// and /items/new.
+			active: () => page.url.pathname.startsWith('/storages') || page.url.pathname.startsWith('/locations')
+		},
 		{ href: '/items', label: 'Objects', icon: Package, active: () => page.url.pathname.startsWith('/items') }
 	];
 </script>

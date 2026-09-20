@@ -51,6 +51,21 @@ func (h *SearchHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 			}
 			s.StorageID = row.StorageID
 			s.Breadcrumb = &breadcrumb
+		} else if row.Kind == "storage" {
+			// Two root storages can now legitimately share a name across
+			// different Locations (architecture plan §3, the user's own
+			// example: two "Living Room"s) — without a breadcrumb here, the
+			// Storage Picker's Type tab and the header search bar would show
+			// two visually identical suggestions with no way to tell them
+			// apart before picking one. Storage hits used to skip this
+			// (an N+1 concern at up to 10 suggestions), but disambiguating
+			// storages by name is exactly what this endpoint needs to do now.
+			breadcrumb, err := h.breadcrumbText(r.Context(), row.ID)
+			if err != nil {
+				serverError(w, r, err)
+				return
+			}
+			s.Breadcrumb = &breadcrumb
 		}
 		suggestions[i] = s
 	}

@@ -12,6 +12,22 @@ export interface Storage {
 	photo_url: string | null;
 	notes: string | null;
 	created_at: string;
+	/** Real column — non-null only on a root storage (nested storages inherit
+	 * their location transitively via the breadcrumb instead, §3). */
+	location_id: number | null;
+	/** Only ever populated by getStorages() (a LEFT JOIN server-side) — every
+	 * other call returns location_id alone. */
+	location_name?: string | null;
+}
+
+/** A flat, non-nested physical property (House, Garage, Parent's House) that
+ * a root-level Storage can optionally belong to (architecture plan §3). */
+export interface Location {
+	id: number;
+	owner_id: number | null;
+	is_shared: boolean;
+	name: string;
+	created_at: string;
 }
 
 export interface Item {
@@ -57,6 +73,9 @@ export interface SearchSuggestion {
 	score: number;
 	/** Present on item hits only (architecture plan §5/§7) — avoids a second lookup. */
 	storage_id?: number;
+	/** Present on both item and storage hits — two root storages can share a
+	 * name across different Locations (§3), so a storage hit needs this too
+	 * to stay distinguishable in a suggestion list. */
 	breadcrumb?: string;
 }
 

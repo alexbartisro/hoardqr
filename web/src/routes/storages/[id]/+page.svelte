@@ -6,18 +6,21 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { deleteStorage, getItems, getStorage, getStorages, updateStorage } from '$lib/api';
-	import { ApiError, type Breadcrumb, type Item, type Storage } from '$lib/types';
+	import { ApiError, type Breadcrumb, type Item, type Location, type Storage } from '$lib/types';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import PhotoUpload from '$lib/components/photo-upload.svelte';
+	import LocationSelect from '$lib/components/location-select.svelte';
 
 	let storage = $state<Storage | null>(null);
 	let breadcrumb = $state<Breadcrumb>([]);
+	let location = $state<Pick<Location, 'id' | 'name'> | null>(null);
 	let children = $state<Storage[]>([]);
 	let items = $state<Item[]>([]);
 	let loadError = $state<string | null>(null);
 	let photoSaveError = $state<string | null>(null);
+	let locationSaveError = $state<string | null>(null);
 
 	let renaming = $state(false);
 	let renameValue = $state('');
@@ -35,7 +38,9 @@
 		const seq = ++loadSeq;
 		storage = null;
 		loadError = null;
+		location = null;
 		photoSaveError = null;
+		locationSaveError = null;
 		renaming = false;
 		renameError = null;
 		savingRename = false;
@@ -46,6 +51,7 @@
 				if (seq !== loadSeq) return;
 				storage = s.storage;
 				breadcrumb = s.breadcrumb;
+				location = s.location;
 				children = childStorages;
 				items = storageItems;
 			})
@@ -69,6 +75,34 @@
 		renameValue = storage.name;
 		renameError = null;
 		renaming = true;
+	}
+
+	// Kept as its own bindable rather than deriving straight from `location`
+	// each render, so LocationSelect can update it optimistically on
+	// selection and this can revert it on a failed save.
+	let selectedLocationId = $state<number | null>(null);
+	$effect(() => {
+		selectedLocationId = location?.id ?? null;
+	});
+
+	// See items/[id]'s handlePhotoChange — same reasoning: no surrounding
+	// edit form to piggyback a save onto, so this PATCHes immediately. Unlike
+	// the photo, a location change also changes the breadcrumb (the prepended
+	// Location itself), so this re-fetches rather than trusting the PATCH
+	// response alone — updateStorage's return value doesn't carry a resolved
+	// breadcrumb.
+	async function handleLocationChange(newLocationId: number | null) {
+		if (!storage) return;
+		locationSaveError = null;
+		try {
+			await updateStorage(storage.id, { location_id: newLocationId });
+			const refreshed = await getStorage(storage.id);
+			breadcrumb = refreshed.breadcrumb;
+			location = refreshed.location;
+		} catch (e) {
+			locationSaveError = e instanceof Error ? e.message : 'Failed to save location.';
+			selectedLocationId = location?.id ?? null; // revert the select
+		}
 	}
 
 	async function saveRename() {
@@ -112,12 +146,16 @@
 		// "not to X" contrast would be confusing (no parent to name) — verified
 		// live: deleting a root storage produced "move to the top level, not
 		// to the parent" with no parent to refer to before this guard was added.
-		const warning =
-			children.length > 0 && storage.parent_id
-				? `\n\n${children.length} storage(s) inside it will move to the top level, not to ${breadcrumb.at(-2)?.name}.`
-				: children.length > 0
-					? `\n\n${children.length} storage(s) inside it will move to the top level.`
-					: '';
+		let warning = '';
+		if (children.length > 0 && storage.parent_id) {
+			warning = `\n\n${children.length} storage(s) inside it will move to the top level, not to ${breadcrumb.at(-2)?.name}.`;
+		} else if (children.length > 0) {
+			warning = `\n\n${children.length} storage(s) inside it will move to the top level.`;
+			// A root storage's own location (if any) is exactly what
+			// StoragesHandler.delete propagates onto the promoted children —
+			// name that here so it doesn't read as data loss (Milestone 2).
+			if (location) warning += ` They will keep the "${location.name}" location.`;
+		}
 		if (!confirm(`Delete "${storage.name}"?${warning}`)) return;
 		deleting = true;
 		deleteError = null;
@@ -167,10 +205,18 @@
 		<p class="text-muted-foreground text-sm">Loading…</p>
 	{:else}
 		<!-- Ancestors only — the current storage gets a real heading below,
-		     not a trailing breadcrumb crumb doing double duty as the title. -->
-		{#if breadcrumb.length > 1}
-			{@const ancestors = breadcrumb.slice(0, -1)}
+		     not a trailing breadcrumb crumb doing double duty as the title.
+		     An assigned Location prepends ahead of even the root ancestor
+		     (it's "further out" than the storage tree itself) — shown even
+		     when there are no storage ancestors at all (a root storage with
+		     a location but no parent). -->
+		{@const ancestors = breadcrumb.slice(0, -1)}
+		{#if ancestors.length > 0 || location}
 			<div class="flex flex-wrap items-center gap-1 text-sm">
+				{#if location}
+					<a href="/locations" class="hover:underline">{location.name}</a>
+					{#if ancestors.length > 0}<span class="text-muted-foreground">›</span>{/if}
+				{/if}
 				{#each ancestors as b, i (b.id)}
 					<a href="/storages/{b.id}" class="hover:underline">{b.name}</a>
 					{#if i < ancestors.length - 1}<span class="text-muted-foreground">›</span>{/if}
@@ -220,6 +266,16 @@
 				</Card.Action>
 			</Card.Header>
 		</Card.Root>
+
+		{#if storage.parent_id === null}
+			<Card.Root variant="glass" class="p-4">
+				<Card.Content class="flex flex-col gap-2 p-0">
+					<span class="text-sm font-medium">Location</span>
+					<LocationSelect bind:locationId={selectedLocationId} onchange={handleLocationChange} />
+					{#if locationSaveError}<p class="text-destructive text-xs">{locationSaveError}</p>{/if}
+				</Card.Content>
+			</Card.Root>
+		{/if}
 
 		{#if children.length > 0}
 			<div class="flex flex-col gap-2">

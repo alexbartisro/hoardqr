@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { deleteItem, getItemById, updateItem } from '$lib/api';
-	import type { Breadcrumb, Item } from '$lib/types';
+	import type { Breadcrumb, Item, Location } from '$lib/types';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Card from '$lib/components/ui/card';
@@ -10,6 +10,7 @@
 
 	let item = $state<Item | null>(null);
 	let breadcrumb = $state<Breadcrumb>([]);
+	let location = $state<Pick<Location, 'id' | 'name'> | null>(null);
 	let loadError = $state<string | null>(null);
 	let deleting = $state(false);
 
@@ -49,6 +50,7 @@
 				if (seq !== loadSeq) return;
 				item = r.item;
 				breadcrumb = r.breadcrumb;
+				location = r.location;
 			})
 			.catch((e) => {
 				if (seq !== loadSeq) return;
@@ -128,17 +130,16 @@
 		<p class="text-muted-foreground text-sm">Loading…</p>
 	{:else}
 		{#if cameFromScan}
+			{@const ancestorNames = [
+				...(location ? [location.name] : []),
+				...breadcrumb.slice(0, -1).map((b) => b.name)
+			]}
 			<Card.Root variant="glass" class="border-primary/50 p-4">
 				<Card.Content class="flex flex-col gap-1 p-0">
 					<p class="text-muted-foreground text-xs font-medium tracking-wide uppercase">This goes in</p>
 					<p class="text-2xl font-semibold">{breadcrumb.at(-1)?.name}</p>
-					{#if breadcrumb.length > 1}
-						<p class="text-muted-foreground text-sm">
-							{breadcrumb
-								.slice(0, -1)
-								.map((b) => b.name)
-								.join(' › ')}
-						</p>
+					{#if ancestorNames.length > 0}
+						<p class="text-muted-foreground text-sm">{ancestorNames.join(' › ')}</p>
 					{/if}
 					<a
 						href="/storages/{item.storage_id}"
@@ -150,6 +151,10 @@
 			</Card.Root>
 		{:else}
 			<div class="flex flex-wrap items-center gap-1 text-sm">
+				{#if location}
+					<a href="/locations" class="hover:underline">{location.name}</a>
+					<span class="text-muted-foreground">›</span>
+				{/if}
 				{#each breadcrumb as b, i (b.id)}
 					<a href="/storages/{b.id}" class="hover:underline">{b.name}</a>
 					{#if i < breadcrumb.length - 1}<span class="text-muted-foreground">›</span>{/if}

@@ -264,9 +264,14 @@ func toItemDTOFromRecentRow(r store.ListRecentItemsRow) ItemDTO {
 }
 
 // SearchSuggestionDTO mirrors SearchSuggestion in web/src/lib/types.ts.
-// StorageID/Breadcrumb are only ever set on item hits (optional fields on
-// the frontend type) — omitempty so a storage/tag hit's JSON simply omits
-// them rather than sending explicit nulls.
+// StorageID is only ever set on item hits (its own storage). Breadcrumb is
+// set on both item and storage hits — a storage hit's own breadcrumb, since
+// two root storages can legitimately share a name across different
+// Locations (architecture plan §3), and without it the Storage Picker and
+// header search bar would show visually identical suggestions with no way
+// to tell them apart before picking one. Tag hits never get either.
+// omitempty on both so a tag hit's JSON simply omits them rather than
+// sending explicit nulls.
 type SearchSuggestionDTO struct {
 	Kind       string  `json:"kind"`
 	ID         int64   `json:"id"`

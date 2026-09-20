@@ -11,7 +11,7 @@
 // server's port so `npm run dev` works against a real local backend too.
 
 import { USERS } from './fixtures';
-import { ApiError, type Breadcrumb, type Item, type Storage, type ResolveStorageResult, type ScanResult, type SearchSuggestion, type Tag, type User } from './types';
+import { ApiError, type Breadcrumb, type Item, type Location, type Storage, type ResolveStorageResult, type ScanResult, type SearchSuggestion, type Tag, type User } from './types';
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 	// A FormData body (photo upload) must NOT get a Content-Type set here —
@@ -52,21 +52,28 @@ export async function getStorages(parentId?: number | null): Promise<Storage[]> 
 }
 
 // --- GET /api/storages/:id ---
-export async function getStorage(id: number): Promise<{ storage: Storage; breadcrumb: Breadcrumb }> {
+export async function getStorage(
+	id: number
+): Promise<{ storage: Storage; breadcrumb: Breadcrumb; location: Pick<Location, 'id' | 'name'> | null }> {
 	return apiFetch(`/api/storages/${id}`);
 }
 
 // --- GET /api/storages/:id/contents (recursive — §3) ---
 export async function getStorageContents(
 	id: number
-): Promise<{ storage: Storage; breadcrumb: Breadcrumb; items: Item[] }> {
+): Promise<{
+	storage: Storage;
+	breadcrumb: Breadcrumb;
+	location: Pick<Location, 'id' | 'name'> | null;
+	items: Item[];
+}> {
 	return apiFetch(`/api/storages/${id}/contents`);
 }
 
 // --- POST /api/storages ---
 export async function createStorage(
 	data: Pick<Storage, 'name'> &
-		Partial<Pick<Storage, 'parent_id' | 'qr_token' | 'photo_url' | 'notes' | 'is_shared'>>
+		Partial<Pick<Storage, 'parent_id' | 'location_id' | 'qr_token' | 'photo_url' | 'notes' | 'is_shared'>>
 ): Promise<Storage> {
 	return apiFetch('/api/storages', { method: 'POST', body: JSON.stringify(data) });
 }
@@ -79,6 +86,31 @@ export async function updateStorage(id: number, patch: Partial<Storage>): Promis
 // --- DELETE /api/storages/:id?force= (§3) ---
 export async function deleteStorage(id: number, opts: { force?: boolean } = {}): Promise<void> {
 	return apiFetch(`/api/storages/${id}${queryString({ force: opts.force })}`, { method: 'DELETE' });
+}
+
+// --- GET /api/locations ---
+export async function getLocations(): Promise<Location[]> {
+	return apiFetch('/api/locations');
+}
+
+// --- GET /api/locations/:id — includes its assigned root storages. ---
+export async function getLocation(id: number): Promise<{ location: Location; storages: Storage[] }> {
+	return apiFetch(`/api/locations/${id}`);
+}
+
+// --- POST /api/locations ---
+export async function createLocation(data: Pick<Location, 'name'>): Promise<Location> {
+	return apiFetch('/api/locations', { method: 'POST', body: JSON.stringify(data) });
+}
+
+// --- PATCH /api/locations/:id — name only, a location's one editable field. ---
+export async function updateLocation(id: number, patch: Pick<Location, 'name'>): Promise<Location> {
+	return apiFetch(`/api/locations/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+}
+
+// --- DELETE /api/locations/:id?force= ---
+export async function deleteLocation(id: number, opts: { force?: boolean } = {}): Promise<void> {
+	return apiFetch(`/api/locations/${id}${queryString({ force: opts.force })}`, { method: 'DELETE' });
 }
 
 // --- GET /api/items?q=&tag=&storage_id= ---
@@ -121,7 +153,9 @@ export async function uploadPhoto(file: Blob): Promise<{ photo_url: string }> {
 }
 
 // --- GET /api/items/:id — not in §9's table (see CLAUDE.md). ---
-export async function getItemById(id: number): Promise<{ item: Item; breadcrumb: Breadcrumb }> {
+export async function getItemById(
+	id: number
+): Promise<{ item: Item; breadcrumb: Breadcrumb; location: Pick<Location, 'id' | 'name'> | null }> {
 	return apiFetch(`/api/items/${id}`);
 }
 

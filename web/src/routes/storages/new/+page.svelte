@@ -8,6 +8,7 @@
 	import { goto } from '$app/navigation';
 	import { createStorage } from '$lib/api';
 	import StoragePicker from '$lib/components/storage-picker.svelte';
+	import LocationSelect from '$lib/components/location-select.svelte';
 	import PhotoUpload from '$lib/components/photo-upload.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -25,6 +26,16 @@
 
 	let parentId = $state<number | null>(null);
 	let breadcrumb = $state('');
+	let locationId = $state<number | null>(null);
+
+	// A location is only meaningful on a root storage (migration 000005's
+	// storages_location_only_on_root) — mirrors the backend's own
+	// auto-clear-on-nest behavior (internal/api/storages.go's update
+	// handler) so the frontend never even tries to submit the contradictory
+	// combination.
+	$effect(() => {
+		if (parentId !== null) locationId = null;
+	});
 
 	let name = $state('');
 	let photoUrl = $state<string | null>(null);
@@ -36,6 +47,7 @@
 		// start pre-filled with the previous storage's data.
 		parentId = null;
 		breadcrumb = '';
+		locationId = null;
 		name = '';
 		photoUrl = null;
 	}
@@ -48,6 +60,7 @@
 			const created = await createStorage({
 				name: name.trim(),
 				parent_id: parentId,
+				location_id: locationId,
 				photo_url: photoUrl,
 				...(scannedCode ? { qr_token: scannedCode } : {})
 			});
@@ -71,6 +84,17 @@
 
 	<Card.Root variant="glass" class="p-4">
 		<StoragePicker bind:storageId={parentId} bind:breadcrumb optional />
+	</Card.Root>
+
+	<Card.Root variant="glass" class="p-4">
+		<Card.Content class="flex flex-col gap-2 p-0">
+			<span class="text-sm font-medium">Location</span>
+			{#if parentId == null}
+				<LocationSelect bind:locationId />
+			{:else}
+				<p class="text-muted-foreground text-sm">Inherits its location from {breadcrumb}.</p>
+			{/if}
+		</Card.Content>
 	</Card.Root>
 
 	<Card.Root variant="glass" class="p-4">

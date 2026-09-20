@@ -273,3 +273,77 @@ func TestSuggestBreadcrumbOmitsLocationWhenUnassigned(t *testing.T) {
 		t.Fatalf("expected to find the test item in suggestions, got %+v", suggestions)
 	}
 }
+
+// TestSuggestStorageHitsGetDistinguishingBreadcrumbs proves a storage-kind
+// suggestion carries a breadcrumb too, not just item hits — two root
+// storages can now legitimately share a name across different Locations
+// (architecture plan §3, the user's own example: two "Living Room"s), and
+// without a breadcrumb here the Storage Picker's Type tab and the header
+// search bar would show two visually identical suggestions with no way to
+// tell them apart before picking one.
+func TestSuggestStorageHitsGetDistinguishingBreadcrumbs(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	house, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "LOCTEST Suggest House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation house: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, house.ID) })
+
+	parents, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "LOCTEST Suggest Parents House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation parents: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, parents.ID) })
+
+	roomA, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST Suggest Living Room", QrToken: "SUGGESTLOC-A", IsShared: true, LocationID: &house.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage roomA: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, roomA.ID) })
+
+	roomB, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "LOCTEST Suggest Living Room", QrToken: "SUGGESTLOC-B", IsShared: true, LocationID: &parents.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage roomB: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, roomB.ID) })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/search/suggest?q=LOCTEST+Suggest+Living+Room", nil)
+	rec := httptest.NewRecorder()
+	NewRouter(pool, t.TempDir()).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var suggestions []SearchSuggestionDTO
+	if err := json.NewDecoder(rec.Body).Decode(&suggestions); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+
+	var gotA, gotB bool
+	for _, s := range suggestions {
+		if s.Kind != "storage" {
+			continue
+		}
+		if s.ID == roomA.ID {
+			gotA = true
+			if s.Breadcrumb == nil || *s.Breadcrumb != "LOCTEST Suggest House > LOCTEST Suggest Living Room" {
+				t.Fatalf("expected roomA's breadcrumb to include its Location, got %v", s.Breadcrumb)
+			}
+		}
+		if s.ID == roomB.ID {
+			gotB = true
+			if s.Breadcrumb == nil || *s.Breadcrumb != "LOCTEST Suggest Parents House > LOCTEST Suggest Living Room" {
+				t.Fatalf("expected roomB's breadcrumb to include its Location, got %v", s.Breadcrumb)
+			}
+		}
+	}
+	if !gotA || !gotB {
+		t.Fatalf("expected both identically-named storages to appear with distinguishing breadcrumbs, got %+v", suggestions)
+	}
+}

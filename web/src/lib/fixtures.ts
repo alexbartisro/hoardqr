@@ -14,6 +14,7 @@ export const STORAGES: Storage[] = [
 		qr_token: 'H4K9P2',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-05T09:00:00Z'
 	},
 	{
@@ -25,6 +26,7 @@ export const STORAGES: Storage[] = [
 		qr_token: '8f2a91c4e7',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-05T09:05:00Z'
 	},
 	{
@@ -36,6 +38,7 @@ export const STORAGES: Storage[] = [
 		qr_token: '3d7b5e19a2',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-05T09:06:00Z'
 	},
 	{
@@ -47,6 +50,7 @@ export const STORAGES: Storage[] = [
 		qr_token: 'b91f4c0a6d',
 		photo_url: null,
 		notes: 'Electronics odds and ends',
+		location_id: null,
 		created_at: '2026-01-05T09:07:00Z'
 	},
 	{
@@ -58,6 +62,7 @@ export const STORAGES: Storage[] = [
 		qr_token: 'R5T8W3',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-06T10:00:00Z'
 	},
 	{
@@ -69,6 +74,7 @@ export const STORAGES: Storage[] = [
 		qr_token: '0e4a7f2c19',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-06T10:10:00Z'
 	},
 	{
@@ -80,6 +86,7 @@ export const STORAGES: Storage[] = [
 		qr_token: '9c3e8b41f0',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-07T11:00:00Z'
 	},
 	{
@@ -91,6 +98,7 @@ export const STORAGES: Storage[] = [
 		qr_token: '5a1d9e7c3b',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-07T11:05:00Z'
 	}
 ];
