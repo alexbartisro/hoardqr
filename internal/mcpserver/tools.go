@@ -33,13 +33,48 @@ func registerTools(s *mcp.Server, pool *pgxpool.Pool) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "add_item",
-		Description: "Catalog a new object and place it in a storage.",
-	}, addItemHandler(q))
+		Description: "Catalog a new object and place it in a storage. Accepts the object's full details (description, condition, purchase date/price, receipt URL, tags) up front, not just name/storage/quantity.",
+	}, addItemHandler(pool))
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "add_storage",
 		Description: "Create a new storage container (a box, shelf, cabinet, room, etc.), optionally nested inside an existing one, or optionally assigned to a Location (a physical property like a house or garage) if it's root-level.",
 	}, addStorageHandler(q))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "edit_item",
+		Description: "Change an existing object's fields (name, description, quantity, condition, purchase date/price, receipt URL). Does not move it (see move_item) or change its tags (see add_item_tag/remove_item_tag).",
+	}, editItemHandler(q))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "delete_item",
+		Description: "Permanently delete an object.",
+	}, deleteItemHandler(q))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "add_item_tag",
+		Description: "Add a tag to an object, e.g. \"add the electronic tool tag to the drill\" — creates the tag if it doesn't exist yet. Does not require knowing the object's existing tags.",
+	}, addItemTagHandler(pool))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "remove_item_tag",
+		Description: "Remove a tag from an object.",
+	}, removeItemTagHandler(q))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "edit_storage",
+		Description: "Rename a storage and/or change its notes. Does not move it (see move_storage).",
+	}, editStorageHandler(q))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "move_storage",
+		Description: "Move a storage into a different parent storage, or promote it to root level under a different Location. Provide exactly one of new_parent or new_location.",
+	}, moveStorageHandler(pool))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "delete_storage",
+		Description: "Permanently delete a storage. Child storages are promoted to root level automatically. Refuses if the storage directly holds objects — move them elsewhere first (see move_item); a storage delete never deletes the objects inside it.",
+	}, deleteStorageHandler(pool))
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "move_item",
@@ -50,6 +85,21 @@ func registerTools(s *mcp.Server, pool *pgxpool.Pool) {
 		Name:        "list_locations",
 		Description: "List every Location — a flat, non-nested physical property (a house, garage, etc.) that a root-level storage can optionally belong to. Read-only; use this to see valid values before calling add_storage with a location.",
 	}, listLocationsHandler(q))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "add_location",
+		Description: "Create a new Location (a physical property like a house or garage).",
+	}, addLocationHandler(q))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "edit_location",
+		Description: "Rename a Location.",
+	}, editLocationHandler(q))
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "delete_location",
+		Description: "Permanently delete a Location. Refuses if storages are still assigned to it unless force is given, which only clears that assignment (the storages themselves are never deleted or otherwise altered).",
+	}, deleteLocationHandler(pool))
 }
 
 // --- find_items ---
@@ -263,9 +313,15 @@ func listLocationContents(ctx context.Context, q *store.Queries, location string
 // --- add_item ---
 
 type addItemInput struct {
-	Name     string `json:"name" jsonschema:"the object's name"`
-	Storage  string `json:"storage" jsonschema:"where to store it — a storage's name, or close to it"`
-	Quantity *int32 `json:"quantity,omitempty" jsonschema:"how many; defaults to 1"`
+	Name          string   `json:"name" jsonschema:"the object's name"`
+	Storage       string   `json:"storage" jsonschema:"where to store it — a storage's name, or close to it"`
+	Quantity      *int32   `json:"quantity,omitempty" jsonschema:"how many; defaults to 1"`
+	Description   *string  `json:"description,omitempty"`
+	Condition     *string  `json:"condition,omitempty" jsonschema:"e.g. new, good, fair, poor"`
+	PurchaseDate  *string  `json:"purchase_date,omitempty" jsonschema:"YYYY-MM-DD"`
+	PurchasePrice *float64 `json:"purchase_price,omitempty"`
+	ReceiptURL    *string  `json:"receipt_url,omitempty"`
+	Tags          []string `json:"tags,omitempty" jsonschema:"tag names to attach — each is created automatically (case-insensitively) if it doesn't exist yet"`
 }
 
 type addItemOutput struct {
@@ -275,7 +331,12 @@ type addItemOutput struct {
 	Code    string `json:"code" jsonschema:"the generated code, printable on a label for this item"`
 }
 
-func addItemHandler(q *store.Queries) mcp.ToolHandlerFor[addItemInput, addItemOutput] {
+// addItemHandler takes the pool (not just q) as of the tags param: linking
+// tags is a second write alongside InsertItem, so the two now need to
+// commit or fail together — same reasoning as internal/api/items.go's
+// create handler, which wraps the identical pair in withTx.
+func addItemHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[addItemInput, addItemOutput] {
+	q := store.New(pool)
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in addItemInput) (*mcp.CallToolResult, addItemOutput, error) {
 		// Mirrors internal/api/items.go's create handler's own
 		// strings.TrimSpace(req.Name) == "" check — REST rejects a blank name,
@@ -292,17 +353,51 @@ func addItemHandler(q *store.Queries) mcp.ToolHandlerFor[addItemInput, addItemOu
 		if in.Quantity != nil {
 			quantity = *in.Quantity
 		}
-		code := codegen.PlainTextCode()
-		item, err := q.InsertItem(ctx, store.InsertItemParams{
-			StorageID:    storageID,
-			IsShared:     true, // no auth yet — every row is public until then (see CLAUDE.md)
-			Name:         name,
-			Quantity:     quantity,
-			QrToken:      code,
-			CustomFields: []byte("{}"),
-		})
+		purchaseDate, err := optionalDate(in.PurchaseDate)
 		if err != nil {
-			return nil, addItemOutput{}, sanitizeToolError(ctx, "add_item", err)
+			return nil, addItemOutput{}, toolErrorf("purchase_date must be YYYY-MM-DD")
+		}
+		code := codegen.PlainTextCode()
+
+		var item store.Item
+		txErr := withTx(ctx, pool, func(tx pgx.Tx) error {
+			txq := store.New(tx)
+			var err error
+			item, err = txq.InsertItem(ctx, store.InsertItemParams{
+				StorageID:     storageID,
+				IsShared:      true, // no auth yet — every row is public until then (see CLAUDE.md)
+				Name:          name,
+				Quantity:      quantity,
+				QrToken:       code,
+				Description:   in.Description,
+				Condition:     in.Condition,
+				PurchaseDate:  purchaseDate,
+				PurchasePrice: optionalNumeric(in.PurchasePrice),
+				ReceiptUrl:    in.ReceiptURL,
+				CustomFields:  []byte("{}"),
+			})
+			if err != nil {
+				return err
+			}
+			if len(in.Tags) == 0 {
+				return nil
+			}
+			tagIDs, err := resolveTagIDs(ctx, txq, in.Tags)
+			if err != nil {
+				return err
+			}
+			for _, tagID := range tagIDs {
+				if err := txq.LinkItemTag(ctx, store.LinkItemTagParams{ItemID: item.ID, TagID: tagID}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if txErr != nil {
+			if isNumericOutOfRange(txErr) {
+				return nil, addItemOutput{}, toolErrorf("purchase_price is out of range")
+			}
+			return nil, addItemOutput{}, sanitizeToolError(ctx, "add_item", txErr)
 		}
 		return nil, addItemOutput{ID: item.ID, Name: item.Name, Storage: matchedStorage, Code: item.QrToken}, nil
 	}
@@ -314,6 +409,7 @@ type addStorageInput struct {
 	Name     string  `json:"name" jsonschema:"the new storage's name"`
 	Parent   *string `json:"parent,omitempty" jsonschema:"an existing storage to nest this inside; omit for a root-level storage"`
 	Location *string `json:"location,omitempty" jsonschema:"an existing Location (a physical property, e.g. a house or garage — see list_locations) this root-level storage belongs to; never combine with parent, since a nested storage always inherits its location from its root ancestor instead"`
+	Notes    *string `json:"notes,omitempty"`
 }
 
 type addStorageOutput struct {
@@ -372,6 +468,7 @@ func addStorageHandler(q *store.Queries) mcp.ToolHandlerFor[addStorageInput, add
 				IsShared:   true, // no auth yet — every row is public until then (see CLAUDE.md)
 				Name:       name,
 				QrToken:    codegen.PlainTextCode(),
+				Notes:      in.Notes,
 			})
 			if err == nil {
 				break

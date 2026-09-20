@@ -244,6 +244,36 @@ func (q *Queries) PromoteItemsToParent(ctx context.Context, arg PromoteItemsToPa
 	return err
 }
 
+const promoteStorageToRoot = `-- name: PromoteStorageToRoot :one
+UPDATE storages SET parent_id = NULL, location_id = $2 WHERE id = $1 RETURNING id, parent_id, owner_id, is_shared, name, qr_token, photo_url, notes, created_at, location_id
+`
+
+type PromoteStorageToRootParams struct {
+	ID         int64
+	LocationID *int64
+}
+
+// MCP's move_storage tool, promote-to-root(-with-a-Location) branch.
+// Detaches from any parent and assigns (or clears, if $2 is NULL) a
+// Location directly.
+func (q *Queries) PromoteStorageToRoot(ctx context.Context, arg PromoteStorageToRootParams) (Storage, error) {
+	row := q.db.QueryRow(ctx, promoteStorageToRoot, arg.ID, arg.LocationID)
+	var i Storage
+	err := row.Scan(
+		&i.ID,
+		&i.ParentID,
+		&i.OwnerID,
+		&i.IsShared,
+		&i.Name,
+		&i.QrToken,
+		&i.PhotoUrl,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.LocationID,
+	)
+	return i, err
+}
+
 const setLocationForStorages = `-- name: SetLocationForStorages :exec
 UPDATE storages SET location_id = $1::bigint WHERE id = ANY($2::bigint[])
 `
@@ -256,6 +286,40 @@ type SetLocationForStoragesParams struct {
 func (q *Queries) SetLocationForStorages(ctx context.Context, arg SetLocationForStoragesParams) error {
 	_, err := q.db.Exec(ctx, setLocationForStorages, arg.LocationID, arg.Ids)
 	return err
+}
+
+const setStorageParent = `-- name: SetStorageParent :one
+UPDATE storages SET parent_id = $2, location_id = NULL WHERE id = $1 RETURNING id, parent_id, owner_id, is_shared, name, qr_token, photo_url, notes, created_at, location_id
+`
+
+type SetStorageParentParams struct {
+	ID       int64
+	ParentID *int64
+}
+
+// MCP's move_storage tool, nest-under-a-parent branch. Nesting a storage
+// always clears its own location_id (storages_location_only_on_root,
+// migration 000004) — it inherits a location transitively via
+// StorageBreadcrumb's root walk instead. The caller (move_storage) is
+// responsible for the cycle check (the new parent can't be this storage or
+// one of its own descendants) before calling this — the query itself has
+// no way to reject that.
+func (q *Queries) SetStorageParent(ctx context.Context, arg SetStorageParentParams) (Storage, error) {
+	row := q.db.QueryRow(ctx, setStorageParent, arg.ID, arg.ParentID)
+	var i Storage
+	err := row.Scan(
+		&i.ID,
+		&i.ParentID,
+		&i.OwnerID,
+		&i.IsShared,
+		&i.Name,
+		&i.QrToken,
+		&i.PhotoUrl,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.LocationID,
+	)
+	return i, err
 }
 
 const storageBreadcrumb = `-- name: StorageBreadcrumb :many
@@ -362,4 +426,43 @@ func (q *Queries) StorageQRTokenInUse(ctx context.Context, arg StorageQRTokenInU
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const updateStorageMetadata = `-- name: UpdateStorageMetadata :one
+UPDATE storages SET
+    name = COALESCE($1, name),
+    notes = COALESCE($2, notes)
+WHERE id = $3
+RETURNING id, parent_id, owner_id, is_shared, name, qr_token, photo_url, notes, created_at, location_id
+`
+
+type UpdateStorageMetadataParams struct {
+	Name  *string
+	Notes *string
+	ID    int64
+}
+
+// MCP's edit_storage tool (name/notes only — moving is a separate concern,
+// see PATCH's dynamic update / MCP's move_storage). COALESCE means a NULL
+// arg leaves that column unchanged, which also means this can't explicitly
+// clear notes back to NULL once set — an accepted limitation for a
+// low-stakes field on a chat-facing tool, not something REST's PATCH (which
+// can distinguish "absent" from "explicit null" via its raw JSON map) is
+// bound by.
+func (q *Queries) UpdateStorageMetadata(ctx context.Context, arg UpdateStorageMetadataParams) (Storage, error) {
+	row := q.db.QueryRow(ctx, updateStorageMetadata, arg.Name, arg.Notes, arg.ID)
+	var i Storage
+	err := row.Scan(
+		&i.ID,
+		&i.ParentID,
+		&i.OwnerID,
+		&i.IsShared,
+		&i.Name,
+		&i.QrToken,
+		&i.PhotoUrl,
+		&i.Notes,
+		&i.CreatedAt,
+		&i.LocationID,
+	)
+	return i, err
 }

@@ -518,6 +518,92 @@ func (q *Queries) TagNamesForItem(ctx context.Context, itemID int64) ([]string, 
 	return items, nil
 }
 
+const unlinkItemTag = `-- name: UnlinkItemTag :execrows
+DELETE FROM item_tags WHERE item_id = $1 AND tag_id = $2
+`
+
+type UnlinkItemTagParams struct {
+	ItemID int64
+	TagID  int64
+}
+
+// remove_item_tag's underlying mutation — :execrows (not :exec) so the
+// handler can report a clean "wasn't tagged with that" instead of a
+// no-op success indistinguishable from an actual removal.
+func (q *Queries) UnlinkItemTag(ctx context.Context, arg UnlinkItemTagParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unlinkItemTag, arg.ItemID, arg.TagID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateItemFields = `-- name: UpdateItemFields :one
+UPDATE items SET
+    name = COALESCE($1, name),
+    description = COALESCE($2, description),
+    quantity = COALESCE($3, quantity),
+    condition = COALESCE($4, condition),
+    purchase_date = COALESCE($5, purchase_date),
+    purchase_price = COALESCE($6, purchase_price),
+    receipt_url = COALESCE($7, receipt_url),
+    updated_at = now()
+WHERE id = $8
+RETURNING id, storage_id, owner_id, is_shared, name, description, quantity, condition, qr_token, photo_url, purchase_date, purchase_price, receipt_url, custom_fields, created_at, updated_at
+`
+
+type UpdateItemFieldsParams struct {
+	Name          *string
+	Description   *string
+	Quantity      *int32
+	Condition     *string
+	PurchaseDate  pgtype.Date
+	PurchasePrice pgtype.Numeric
+	ReceiptUrl    *string
+	ID            int64
+}
+
+// MCP's edit_item tool. Storage moves go through move_item (its own audit
+// trail), and tags through add_item_tag/remove_item_tag (additive, so a
+// caller never needs to know an item's full existing tag list just to add
+// one) — neither is a column this touches. COALESCE means a NULL arg
+// leaves that column unchanged; same accepted "can't explicitly clear a
+// nullable field back to NULL via this tool" limitation as
+// UpdateStorageMetadata, for the same reason (no raw-JSON-map layer here to
+// distinguish "absent" from "explicit null" the way REST's PATCH has).
+func (q *Queries) UpdateItemFields(ctx context.Context, arg UpdateItemFieldsParams) (Item, error) {
+	row := q.db.QueryRow(ctx, updateItemFields,
+		arg.Name,
+		arg.Description,
+		arg.Quantity,
+		arg.Condition,
+		arg.PurchaseDate,
+		arg.PurchasePrice,
+		arg.ReceiptUrl,
+		arg.ID,
+	)
+	var i Item
+	err := row.Scan(
+		&i.ID,
+		&i.StorageID,
+		&i.OwnerID,
+		&i.IsShared,
+		&i.Name,
+		&i.Description,
+		&i.Quantity,
+		&i.Condition,
+		&i.QrToken,
+		&i.PhotoUrl,
+		&i.PurchaseDate,
+		&i.PurchasePrice,
+		&i.ReceiptUrl,
+		&i.CustomFields,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateItemStorage = `-- name: UpdateItemStorage :execrows
 UPDATE items SET storage_id = $1::bigint, updated_at = now()
 WHERE id = $2::bigint

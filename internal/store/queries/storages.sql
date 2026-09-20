@@ -13,6 +13,20 @@ ORDER BY s.name;
 -- name: GetStorageByID :one
 SELECT * FROM storages WHERE id = $1;
 
+-- name: UpdateStorageMetadata :one
+-- MCP's edit_storage tool (name/notes only — moving is a separate concern,
+-- see PATCH's dynamic update / MCP's move_storage). COALESCE means a NULL
+-- arg leaves that column unchanged, which also means this can't explicitly
+-- clear notes back to NULL once set — an accepted limitation for a
+-- low-stakes field on a chat-facing tool, not something REST's PATCH (which
+-- can distinguish "absent" from "explicit null" via its raw JSON map) is
+-- bound by.
+UPDATE storages SET
+    name = COALESCE(sqlc.narg('name'), name),
+    notes = COALESCE(sqlc.narg('notes'), notes)
+WHERE id = sqlc.arg('id')
+RETURNING *;
+
 -- name: StorageExists :one
 SELECT EXISTS(SELECT 1 FROM storages WHERE id = $1);
 
@@ -98,6 +112,22 @@ SELECT count(*) FROM items WHERE storage_id = $1;
 -- ON DELETE SET NULL when the DeleteStorage statement runs.
 UPDATE items SET storage_id = sqlc.arg(new_storage_id)::bigint
 WHERE storage_id = sqlc.arg(old_storage_id)::bigint;
+
+-- name: SetStorageParent :one
+-- MCP's move_storage tool, nest-under-a-parent branch. Nesting a storage
+-- always clears its own location_id (storages_location_only_on_root,
+-- migration 000004) — it inherits a location transitively via
+-- StorageBreadcrumb's root walk instead. The caller (move_storage) is
+-- responsible for the cycle check (the new parent can't be this storage or
+-- one of its own descendants) before calling this — the query itself has
+-- no way to reject that.
+UPDATE storages SET parent_id = $2, location_id = NULL WHERE id = $1 RETURNING *;
+
+-- name: PromoteStorageToRoot :one
+-- MCP's move_storage tool, promote-to-root(-with-a-Location) branch.
+-- Detaches from any parent and assigns (or clears, if $2 is NULL) a
+-- Location directly.
+UPDATE storages SET parent_id = NULL, location_id = $2 WHERE id = $1 RETURNING *;
 
 -- name: DeleteStorage :exec
 DELETE FROM storages WHERE id = $1;

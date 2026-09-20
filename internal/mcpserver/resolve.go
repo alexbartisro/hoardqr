@@ -175,6 +175,22 @@ func resolveItem(ctx context.Context, q *store.Queries, name string) (id int64, 
 	return top.ID, top.Name, *top.StorageID, nil
 }
 
+// effectiveLocationID reads the *effective* Location off a StorageBreadcrumb
+// result — its own location_id if it's root, or inherited transitively if
+// it's nested several levels deep — the same value breadcrumbText's own
+// Location-prefix check reads off crumb[0]. Used by delete_storage to decide
+// whether a deleted storage's promoted children need that location applied
+// to them (internal/api/storages.go's delete handler does the identical
+// check via its own breadcrumbAndLocation helper, unexported in that
+// package — this is mcpserver's equivalent, not a duplicate of a shared
+// utility that could just be imported).
+func effectiveLocationID(crumb []store.StorageBreadcrumbRow) *int64 {
+	if len(crumb) == 0 {
+		return nil
+	}
+	return crumb[0].LocationID
+}
+
 // breadcrumbText joins a storage's root-to-leaf path the same way every
 // other breadcrumb in the app does (e.g. internal/api/items.go's
 // GetItemByID handler) — "Balcony > Storage Cabinet".

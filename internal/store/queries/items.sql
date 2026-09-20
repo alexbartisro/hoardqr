@@ -97,6 +97,33 @@ WHERE id = sqlc.arg(id)::bigint;
 -- name: ItemExists :one
 SELECT EXISTS(SELECT 1 FROM items WHERE id = $1);
 
+-- name: UpdateItemFields :one
+-- MCP's edit_item tool. Storage moves go through move_item (its own audit
+-- trail), and tags through add_item_tag/remove_item_tag (additive, so a
+-- caller never needs to know an item's full existing tag list just to add
+-- one) — neither is a column this touches. COALESCE means a NULL arg
+-- leaves that column unchanged; same accepted "can't explicitly clear a
+-- nullable field back to NULL via this tool" limitation as
+-- UpdateStorageMetadata, for the same reason (no raw-JSON-map layer here to
+-- distinguish "absent" from "explicit null" the way REST's PATCH has).
+UPDATE items SET
+    name = COALESCE(sqlc.narg('name'), name),
+    description = COALESCE(sqlc.narg('description'), description),
+    quantity = COALESCE(sqlc.narg('quantity'), quantity),
+    condition = COALESCE(sqlc.narg('condition'), condition),
+    purchase_date = COALESCE(sqlc.narg('purchase_date'), purchase_date),
+    purchase_price = COALESCE(sqlc.narg('purchase_price'), purchase_price),
+    receipt_url = COALESCE(sqlc.narg('receipt_url'), receipt_url),
+    updated_at = now()
+WHERE id = sqlc.arg('id')
+RETURNING *;
+
+-- name: UnlinkItemTag :execrows
+-- remove_item_tag's underlying mutation — :execrows (not :exec) so the
+-- handler can report a clean "wasn't tagged with that" instead of a
+-- no-op success indistinguishable from an actual removal.
+DELETE FROM item_tags WHERE item_id = $1 AND tag_id = $2;
+
 -- name: ListTags :many
 SELECT * FROM tags ORDER BY name;
 

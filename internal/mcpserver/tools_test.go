@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -220,6 +221,31 @@ func requireNoLeftoverTestRows(t *testing.T, pool *pgxpool.Pool) {
 	}
 	if locationCount > 0 {
 		t.Fatalf("found %d leftover test location(s) from a previous run's failed cleanup — clean up manually before re-running", locationCount)
+	}
+
+	// Items and tags, added for the full-CRUD (edit/delete/move/tag) tools —
+	// same reasoning as the locations sweep above: this guard exists for the
+	// case where a test's own t.Cleanup didn't run.
+	var itemCount int
+	err = pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM items WHERE name LIKE 'MCP Test %' OR trim(name) = ''`,
+	).Scan(&itemCount)
+	if err != nil {
+		t.Fatalf("checking for leftover test items: %v", err)
+	}
+	if itemCount > 0 {
+		t.Fatalf("found %d leftover test item(s) from a previous run's failed cleanup — clean up manually before re-running", itemCount)
+	}
+
+	var tagCount int
+	err = pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM tags WHERE name LIKE 'MCP Test %'`,
+	).Scan(&tagCount)
+	if err != nil {
+		t.Fatalf("checking for leftover test tags: %v", err)
+	}
+	if tagCount > 0 {
+		t.Fatalf("found %d leftover test tag(s) from a previous run's failed cleanup — clean up manually before re-running", tagCount)
 	}
 }
 
@@ -1027,5 +1053,916 @@ func TestMCPToolsListLocations(t *testing.T) {
 	}
 	if len(names) != 2 || names[0] != "MCP Test List Apartment" || names[1] != "MCP Test List Garage" {
 		t.Fatalf("expected [MCP Test List Apartment, MCP Test List Garage] in that order, got %v", names)
+	}
+}
+
+// ==================== Locations CRUD ====================
+
+func TestMCPToolsAddLocation(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var out addLocationOutput
+	callTool(t, cs, "add_location", map[string]any{"name": "MCP Test Add Location House"}, &out)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, out.ID) })
+
+	if out.ID == 0 || out.Name != "MCP Test Add Location House" {
+		t.Fatalf("unexpected add_location result: %+v", out)
+	}
+}
+
+func TestMCPToolsAddLocationRejectsCaseVariantDuplicate(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var first addLocationOutput
+	callTool(t, cs, "add_location", map[string]any{"name": "MCP Test Dup Location"}, &first)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, first.ID) })
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "add_location", Arguments: map[string]any{"name": "mcp test dup location"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected a duplicate-name error, got success: %s", textOf(t, res))
+	}
+}
+
+func TestMCPToolsEditLocation(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var created addLocationOutput
+	callTool(t, cs, "add_location", map[string]any{"name": "MCP Test Edit Location Old"}, &created)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, created.ID) })
+
+	var edited editLocationOutput
+	callTool(t, cs, "edit_location", map[string]any{
+		"location": "mcp test edit location old", "name": "MCP Test Edit Location New",
+	}, &edited)
+	if edited.ID != created.ID || edited.Name != "MCP Test Edit Location New" {
+		t.Fatalf("unexpected edit_location result: %+v", edited)
+	}
+}
+
+func TestMCPToolsDeleteLocationWithoutStoragesSucceeds(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var created addLocationOutput
+	callTool(t, cs, "add_location", map[string]any{"name": "MCP Test Delete Empty Location"}, &created)
+
+	var out deleteLocationOutput
+	callTool(t, cs, "delete_location", map[string]any{"location": "MCP Test Delete Empty Location"}, &out)
+	if out.StoragesUnassigned != 0 || out.Deleted != "MCP Test Delete Empty Location" {
+		t.Fatalf("unexpected delete_location result: %+v", out)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM locations WHERE id = $1`, created.ID).Scan(&count); err != nil {
+		t.Fatalf("checking deletion: %v", err)
+	}
+	if count != 0 {
+		t.Fatal("location should be deleted")
+	}
+}
+
+// TestMCPToolsDeleteLocationWithStoragesRequiresForce proves delete_location's
+// force is safe to expose (unlike delete_storage's, removed entirely): it
+// only ever clears a storage's location assignment, never deletes or
+// otherwise alters the storage itself.
+func TestMCPToolsDeleteLocationWithStoragesRequiresForce(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	var loc addLocationOutput
+	callTool(t, cs, "add_location", map[string]any{"name": "MCP Test Delete Blocked Location"}, &loc)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID) })
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{
+		"name": "MCP Test Delete Blocked Storage", "location": "MCP Test Delete Blocked Location",
+	}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "delete_location", Arguments: map[string]any{"location": "MCP Test Delete Blocked Location"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected refusal without force, got success: %s", textOf(t, res))
+	}
+
+	exists, err := q.StorageExists(ctx, storage.ID)
+	if err != nil {
+		t.Fatalf("StorageExists: %v", err)
+	}
+	if !exists {
+		t.Fatal("storage must not be deleted or altered by a refused delete_location call")
+	}
+
+	var out deleteLocationOutput
+	callTool(t, cs, "delete_location", map[string]any{
+		"location": "MCP Test Delete Blocked Location", "force": true,
+	}, &out)
+	if out.StoragesUnassigned != 1 {
+		t.Fatalf("expected 1 storage unassigned, got %d", out.StoragesUnassigned)
+	}
+
+	s, err := q.GetStorageByID(ctx, storage.ID)
+	if err != nil {
+		t.Fatalf("GetStorageByID: %v", err)
+	}
+	if s.LocationID != nil {
+		t.Fatal("storage should be unassigned, not left with a location pointing at a deleted row")
+	}
+}
+
+// ==================== Storage edit/move/delete ====================
+
+func TestMCPToolsEditStorageNameAndNotes(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Edit Storage Old"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	var edited editStorageOutput
+	callTool(t, cs, "edit_storage", map[string]any{
+		"storage": "mcp test edit storage old", "name": "MCP Test Edit Storage New", "notes": "some notes",
+	}, &edited)
+	if edited.Name != "MCP Test Edit Storage New" {
+		t.Fatalf("unexpected edit_storage result: %+v", edited)
+	}
+
+	var notes *string
+	if err := pool.QueryRow(ctx, `SELECT notes FROM storages WHERE id = $1`, storage.ID).Scan(&notes); err != nil {
+		t.Fatalf("checking notes: %v", err)
+	}
+	if notes == nil || *notes != "some notes" {
+		t.Fatalf("expected notes to be saved, got %v", notes)
+	}
+}
+
+func TestMCPToolsEditStorageRejectsNoFields(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Edit Storage NoFields"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "edit_storage", Arguments: map[string]any{"storage": "MCP Test Edit Storage NoFields"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected a tool error when no fields are given, got success: %s", textOf(t, res))
+	}
+}
+
+// TestMCPToolsMoveStorageNests proves the new_parent branch nests the
+// storage and clears its own location — the exact auto-clear-on-nest
+// behavior internal/api/storages.go's PATCH handler already enforces.
+func TestMCPToolsMoveStorageNests(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	var loc addLocationOutput
+	callTool(t, cs, "add_location", map[string]any{"name": "MCP Test Move Storage Location"}, &loc)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID) })
+
+	var root, other addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{
+		"name": "MCP Test Move Root", "location": "MCP Test Move Storage Location",
+	}, &root)
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Move Other Root"}, &other)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	var moved moveStorageOutput
+	callTool(t, cs, "move_storage", map[string]any{
+		"storage": "MCP Test Move Root", "new_parent": "MCP Test Move Other Root",
+	}, &moved)
+	if moved.Path != "MCP Test Move Other Root > MCP Test Move Root" {
+		t.Fatalf("unexpected path after nesting: %q", moved.Path)
+	}
+
+	s, err := q.GetStorageByID(ctx, root.ID)
+	if err != nil {
+		t.Fatalf("GetStorageByID: %v", err)
+	}
+	if s.ParentID == nil || *s.ParentID != other.ID {
+		t.Fatalf("expected parent_id to be set to the new parent, got %v", s.ParentID)
+	}
+	if s.LocationID != nil {
+		t.Fatal("expected location_id to be cleared once nested — a nested storage can't have its own location")
+	}
+}
+
+// TestMCPToolsMoveStoragePromotesToRootWithLocation proves the new_location
+// branch detaches from any parent and assigns the Location directly.
+func TestMCPToolsMoveStoragePromotesToRootWithLocation(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	var loc addLocationOutput
+	callTool(t, cs, "add_location", map[string]any{"name": "MCP Test Promote Location"}, &loc)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID) })
+
+	var root, child addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Promote Root"}, &root)
+	callTool(t, cs, "add_storage", map[string]any{
+		"name": "MCP Test Promote Child", "parent": "MCP Test Promote Root",
+	}, &child)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	var moved moveStorageOutput
+	callTool(t, cs, "move_storage", map[string]any{
+		"storage": "MCP Test Promote Child", "new_location": "MCP Test Promote Location",
+	}, &moved)
+	if moved.Path != "MCP Test Promote Location > MCP Test Promote Child" {
+		t.Fatalf("unexpected path after promotion: %q", moved.Path)
+	}
+
+	s, err := q.GetStorageByID(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetStorageByID: %v", err)
+	}
+	if s.ParentID != nil {
+		t.Fatal("expected parent_id to be cleared — this storage should now be root-level")
+	}
+	if s.LocationID == nil || *s.LocationID != loc.ID {
+		t.Fatalf("expected location_id to be set to the new location, got %v", s.LocationID)
+	}
+}
+
+func TestMCPToolsMoveStorageRejectsBothOrNeither(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Move Both Or Neither"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "move_storage", Arguments: map[string]any{"storage": "MCP Test Move Both Or Neither"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected refusal when neither new_parent nor new_location is given, got success: %s", textOf(t, res))
+	}
+
+	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "move_storage",
+		Arguments: map[string]any{
+			"storage": "MCP Test Move Both Or Neither", "new_parent": "x", "new_location": "y",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected refusal when both new_parent and new_location are given, got success: %s", textOf(t, res))
+	}
+}
+
+func TestMCPToolsMoveStorageRejectsCycle(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var root, child addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Cycle Root"}, &root)
+	callTool(t, cs, "add_storage", map[string]any{
+		"name": "MCP Test Cycle Child", "parent": "MCP Test Cycle Root",
+	}, &child)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "move_storage",
+		Arguments: map[string]any{"storage": "MCP Test Cycle Root", "new_parent": "MCP Test Cycle Child"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected a cycle to be rejected, got success: %s", textOf(t, res))
+	}
+}
+
+// TestMCPToolsDeleteStorageWithDirectItemsAlwaysRefuses proves delete_storage
+// has no force override at all — a root storage holding items directly
+// always refuses, and the items are never touched, matching the
+// REST/web-UI-wide rule (2026-09-20: deleting a storage must never delete
+// the items inside it, in any case).
+func TestMCPToolsDeleteStorageWithDirectItemsAlwaysRefuses(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Delete Blocked Storage2"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Delete Blocked Item", "storage": "MCP Test Delete Blocked Storage2",
+	}, &item)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
+
+	// No "force" field exists on this tool's schema at all — passing one
+	// anyway is rejected at the protocol layer before the handler ever
+	// runs, which is even stronger proof there's no override than a
+	// business-logic refusal would be.
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "delete_storage",
+		Arguments: map[string]any{"storage": "MCP Test Delete Blocked Storage2", "force": true},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected a schema-validation error for an unrecognized force param, got success: %s", textOf(t, res))
+	}
+	if !strings.Contains(textOf(t, res), "force") {
+		t.Fatalf("expected the schema error to name the unrecognized force field, got %q", textOf(t, res))
+	}
+
+	// The real (fieldless) call must refuse too, and point at move_item.
+	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "delete_storage",
+		Arguments: map[string]any{"storage": "MCP Test Delete Blocked Storage2"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected delete_storage to always refuse when items are held directly, got success: %s", textOf(t, res))
+	}
+	if !strings.Contains(textOf(t, res), "move_item") {
+		t.Fatalf("expected the refusal to point at move_item, got %q", textOf(t, res))
+	}
+
+	itemExists, err := q.ItemExists(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("ItemExists: %v", err)
+	}
+	if !itemExists {
+		t.Fatal("item must survive a refused delete_storage call")
+	}
+	storageExists, err := q.StorageExists(ctx, storage.ID)
+	if err != nil {
+		t.Fatalf("StorageExists: %v", err)
+	}
+	if !storageExists {
+		t.Fatal("storage must survive a refused delete_storage call")
+	}
+}
+
+// TestMCPToolsDeleteStoragePromotesChildrenAndLocation proves the
+// non-destructive parts of delete_storage still work: a non-root storage's
+// direct items promote to its parent, and a deleted storage's effective
+// Location propagates onto any children it promotes to root — mirroring
+// internal/api/storages.go's delete handler exactly.
+func TestMCPToolsDeleteStoragePromotesChildrenAndLocation(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	var loc addLocationOutput
+	callTool(t, cs, "add_location", map[string]any{"name": "MCP Test Delete Propagate Location"}, &loc)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc.ID) })
+
+	var root, middle, leaf addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{
+		"name": "MCP Test Delete Propagate Root", "location": "MCP Test Delete Propagate Location",
+	}, &root)
+	callTool(t, cs, "add_storage", map[string]any{
+		"name": "MCP Test Delete Propagate Middle", "parent": "MCP Test Delete Propagate Root",
+	}, &middle)
+	callTool(t, cs, "add_storage", map[string]any{
+		"name": "MCP Test Delete Propagate Leaf", "parent": "MCP Test Delete Propagate Middle",
+	}, &leaf)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Delete Propagate Item", "storage": "MCP Test Delete Propagate Middle",
+	}, &item)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
+
+	var out deleteStorageOutput
+	callTool(t, cs, "delete_storage", map[string]any{"storage": "MCP Test Delete Propagate Middle"}, &out)
+	if out.ChildrenPromoted != 1 {
+		t.Fatalf("expected 1 child storage promoted, got %d", out.ChildrenPromoted)
+	}
+
+	// The item directly in "Middle" must have promoted to "Root" (Middle's parent).
+	updatedItem, err := q.GetItemByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("GetItemByID: %v", err)
+	}
+	if updatedItem.StorageID != root.ID {
+		t.Fatalf("expected item to promote to the deleted storage's parent (%d), got %d", root.ID, updatedItem.StorageID)
+	}
+
+	// "Leaf" must now be root-level and must have inherited Root's location.
+	updatedLeaf, err := q.GetStorageByID(ctx, leaf.ID)
+	if err != nil {
+		t.Fatalf("GetStorageByID: %v", err)
+	}
+	if updatedLeaf.ParentID != nil {
+		t.Fatalf("expected leaf to be promoted to root, still has parent_id = %v", updatedLeaf.ParentID)
+	}
+	if updatedLeaf.LocationID == nil || *updatedLeaf.LocationID != loc.ID {
+		t.Fatalf("expected leaf to inherit the deleted storage's effective location, got %v", updatedLeaf.LocationID)
+	}
+}
+
+// ==================== Item edit/delete/tags ====================
+
+func TestMCPToolsEditItemFields(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Edit Item Storage"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Edit Item Widget", "storage": "MCP Test Edit Item Storage",
+	}, &item)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
+
+	price := 12.5
+	var edited editItemOutput
+	callTool(t, cs, "edit_item", map[string]any{
+		"item": "mcp test edit item widget", "name": "MCP Test Edit Item Widget Renamed",
+		"description": "a new description", "quantity": int32(4), "condition": "good",
+		"purchase_date": "2026-01-15", "purchase_price": price, "receipt_url": "https://example.com/r.pdf",
+	}, &edited)
+	if edited.Name != "MCP Test Edit Item Widget Renamed" {
+		t.Fatalf("unexpected edit_item result: %+v", edited)
+	}
+
+	var description, condition, receiptURL *string
+	var quantity int32
+	var purchaseDate *time.Time
+	var purchasePrice *float64
+	err := pool.QueryRow(ctx,
+		`SELECT description, quantity, condition, purchase_date, purchase_price, receipt_url FROM items WHERE id = $1`,
+		item.ID,
+	).Scan(&description, &quantity, &condition, &purchaseDate, &purchasePrice, &receiptURL)
+	if err != nil {
+		t.Fatalf("checking saved fields: %v", err)
+	}
+	if description == nil || *description != "a new description" {
+		t.Fatalf("expected description to be saved, got %v", description)
+	}
+	if quantity != 4 {
+		t.Fatalf("expected quantity 4, got %d", quantity)
+	}
+	if condition == nil || *condition != "good" {
+		t.Fatalf("expected condition 'good', got %v", condition)
+	}
+	if purchaseDate == nil || purchaseDate.Format("2006-01-02") != "2026-01-15" {
+		t.Fatalf("expected purchase_date 2026-01-15, got %v", purchaseDate)
+	}
+	if purchasePrice == nil || *purchasePrice != 12.5 {
+		t.Fatalf("expected purchase_price 12.5, got %v", purchasePrice)
+	}
+	if receiptURL == nil || *receiptURL != "https://example.com/r.pdf" {
+		t.Fatalf("expected receipt_url to be saved, got %v", receiptURL)
+	}
+}
+
+func TestMCPToolsEditItemRejectsNoFields(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Edit Item NoFields Storage"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Edit Item NoFields Widget", "storage": "MCP Test Edit Item NoFields Storage",
+	}, &item)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "edit_item", Arguments: map[string]any{"item": "MCP Test Edit Item NoFields Widget"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected a tool error when no fields are given, got success: %s", textOf(t, res))
+	}
+}
+
+func TestMCPToolsDeleteItem(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Delete Item Storage"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Delete Item Widget", "storage": "MCP Test Delete Item Storage",
+	}, &item)
+
+	var out deleteItemOutput
+	callTool(t, cs, "delete_item", map[string]any{"item": "mcp test delete item widget"}, &out)
+	if out.Deleted != "MCP Test Delete Item Widget" {
+		t.Fatalf("unexpected delete_item result: %+v", out)
+	}
+
+	exists, err := q.ItemExists(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("ItemExists: %v", err)
+	}
+	if exists {
+		t.Fatal("item should be deleted")
+	}
+}
+
+// TestMCPToolsAddItemTagIsIdempotent proves adding the same tag twice
+// doesn't duplicate the link (LinkItemTag's own ON CONFLICT DO NOTHING) and
+// that a not-yet-existing tag is created on the fly.
+func TestMCPToolsAddItemTagIsIdempotent(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Tag Storage"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Tag Drill", "storage": "MCP Test Tag Storage",
+	}, &item)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM tags WHERE name LIKE 'MCP Test %'`) })
+
+	var first addItemTagOutput
+	callTool(t, cs, "add_item_tag", map[string]any{"item": "MCP Test Tag Drill", "tag": "MCP Test Tag Electronic Tool"}, &first)
+	if len(first.Tags) != 1 || first.Tags[0] != "MCP Test Tag Electronic Tool" {
+		t.Fatalf("unexpected tags after first add: %+v", first.Tags)
+	}
+
+	var second addItemTagOutput
+	callTool(t, cs, "add_item_tag", map[string]any{"item": "MCP Test Tag Drill", "tag": "mcp test tag electronic tool"}, &second)
+	if len(second.Tags) != 1 {
+		t.Fatalf("expected adding the same tag again to stay idempotent, got %+v", second.Tags)
+	}
+}
+
+func TestMCPToolsRemoveItemTag(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Untag Storage"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Untag Drill", "storage": "MCP Test Untag Storage",
+		"tags": []string{"MCP Test Untag TagA", "MCP Test Untag TagB"},
+	}, &item)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM tags WHERE name LIKE 'MCP Test %'`) })
+
+	var out removeItemTagOutput
+	callTool(t, cs, "remove_item_tag", map[string]any{"item": "MCP Test Untag Drill", "tag": "mcp test untag taga"}, &out)
+	if len(out.Tags) != 1 || out.Tags[0] != "MCP Test Untag TagB" {
+		t.Fatalf("expected only TagB left, got %+v", out.Tags)
+	}
+}
+
+func TestMCPToolsRemoveItemTagErrorsWhenNotTagged(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Untag Missing Storage"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Untag Missing Drill", "storage": "MCP Test Untag Missing Storage",
+	}, &item)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
+
+	// Tag doesn't exist at all.
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "remove_item_tag",
+		Arguments: map[string]any{"item": "MCP Test Untag Missing Drill", "tag": "MCP Test Nonexistent Tag"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected an error for a nonexistent tag, got success: %s", textOf(t, res))
+	}
+
+	// Tag exists (created via a different item) but isn't attached to this one.
+	var other addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Untag Missing Other", "storage": "MCP Test Untag Missing Storage",
+		"tags": []string{"MCP Test Untag Missing RealTag"},
+	}, &other)
+
+	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "remove_item_tag",
+		Arguments: map[string]any{"item": "MCP Test Untag Missing Drill", "tag": "MCP Test Untag Missing RealTag"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected an error for a real tag the item isn't wearing, got success: %s", textOf(t, res))
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM tags WHERE name LIKE 'MCP Test %'`) })
+}
+
+// ==================== add_item / add_storage field parity ====================
+
+func TestMCPToolsAddItemAcceptsFullFieldsAndTags(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Full Fields Storage"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	price := 99.99
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Full Fields Widget", "storage": "MCP Test Full Fields Storage",
+		"description": "full field test", "condition": "new", "purchase_date": "2026-02-01",
+		"purchase_price": price, "receipt_url": "https://example.com/receipt.pdf",
+		"tags": []string{"MCP Test Full Fields TagA", "MCP Test Full Fields TagB"},
+	}, &item)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM tags WHERE name LIKE 'MCP Test %'`) })
+
+	q := store.New(pool)
+	row, err := q.GetItemByID(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("GetItemByID: %v", err)
+	}
+	if row.Description == nil || *row.Description != "full field test" {
+		t.Fatalf("expected description saved, got %v", row.Description)
+	}
+	if row.Condition == nil || *row.Condition != "new" {
+		t.Fatalf("expected condition saved, got %v", row.Condition)
+	}
+	if len(row.Tags) != 2 || row.Tags[0] != "MCP Test Full Fields TagA" || row.Tags[1] != "MCP Test Full Fields TagB" {
+		t.Fatalf("expected both tags attached in order, got %v", row.Tags)
+	}
+}
+
+func TestMCPToolsAddStorageAcceptsNotes(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{
+		"name": "MCP Test Storage Notes", "notes": "kept in the garage",
+	}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	var notes *string
+	if err := pool.QueryRow(ctx, `SELECT notes FROM storages WHERE id = $1`, storage.ID).Scan(&notes); err != nil {
+		t.Fatalf("checking notes: %v", err)
+	}
+	if notes == nil || *notes != "kept in the garage" {
+		t.Fatalf("expected notes to be saved, got %v", notes)
+	}
+}
+
+// TestMCPToolsEditItemLeavesOmittedFieldsUnchanged proves UpdateItemFields'
+// COALESCE(sqlc.narg(x), x) pattern actually works as documented — editing
+// only quantity must not touch description/condition/purchase_price, which
+// TestMCPToolsEditItemFields alone (it sets every field) can't catch: if
+// UpdateItemFields' COALESCE were ever simplified away to a plain SET, this
+// is the only test that would fail.
+func TestMCPToolsEditItemLeavesOmittedFieldsUnchanged(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Unchanged Fields Storage"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	price := 42.0
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Unchanged Fields Widget", "storage": "MCP Test Unchanged Fields Storage",
+		"description": "original description", "condition": "good", "purchase_price": price,
+	}, &item)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
+
+	var edited editItemOutput
+	callTool(t, cs, "edit_item", map[string]any{
+		"item": "MCP Test Unchanged Fields Widget", "quantity": int32(7),
+	}, &edited)
+
+	var description, condition *string
+	var quantity int32
+	var purchasePrice *float64
+	err := pool.QueryRow(ctx,
+		`SELECT description, quantity, condition, purchase_price FROM items WHERE id = $1`, item.ID,
+	).Scan(&description, &quantity, &condition, &purchasePrice)
+	if err != nil {
+		t.Fatalf("checking fields: %v", err)
+	}
+	if quantity != 7 {
+		t.Fatalf("expected quantity to change to 7, got %d", quantity)
+	}
+	if description == nil || *description != "original description" {
+		t.Fatalf("expected description to survive an edit_item call that didn't mention it, got %v", description)
+	}
+	if condition == nil || *condition != "good" {
+		t.Fatalf("expected condition to survive an edit_item call that didn't mention it, got %v", condition)
+	}
+	if purchasePrice == nil || *purchasePrice != 42.0 {
+		t.Fatalf("expected purchase_price to survive an edit_item call that didn't mention it, got %v", purchasePrice)
+	}
+}
+
+// TestMCPToolsEditStorageLeavesOmittedFieldUnchanged is
+// TestMCPToolsEditItemLeavesOmittedFieldsUnchanged's sibling for
+// UpdateStorageMetadata.
+func TestMCPToolsEditStorageLeavesOmittedFieldUnchanged(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{
+		"name": "MCP Test Unchanged Storage Old", "notes": "original notes",
+	}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	callTool(t, cs, "edit_storage", map[string]any{
+		"storage": "MCP Test Unchanged Storage Old", "name": "MCP Test Unchanged Storage New",
+	}, new(editStorageOutput))
+
+	var notes *string
+	if err := pool.QueryRow(ctx, `SELECT notes FROM storages WHERE id = $1`, storage.ID).Scan(&notes); err != nil {
+		t.Fatalf("checking notes: %v", err)
+	}
+	if notes == nil || *notes != "original notes" {
+		t.Fatalf("expected notes to survive an edit_storage call that only renamed, got %v", notes)
+	}
+}
+
+// TestMCPToolsAddItemRejectsPurchasePriceOutOfRange and its edit_item
+// sibling prove a NUMERIC(10,2) overflow surfaces as a clear tool error, not
+// sanitizeToolError's generic "internal error" — the REST API already fixed
+// the identical gap for this column (CLAUDE.md's "Map FK/constraint
+// violations to proper 4xx" item); MCP needs the same treatment since it
+// exposes the same column now.
+func TestMCPToolsAddItemRejectsPurchasePriceOutOfRange(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Price Range Storage"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	tooLarge := 1e12
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "add_item",
+		Arguments: map[string]any{
+			"name": "MCP Test Price Range Widget", "storage": "MCP Test Price Range Storage",
+			"purchase_price": tooLarge,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected an out-of-range error, got success: %s", textOf(t, res))
+	}
+	if !strings.Contains(textOf(t, res), "purchase_price") || strings.Contains(textOf(t, res), "internal error") {
+		t.Fatalf("expected a clear purchase_price error, not an internal error, got %q", textOf(t, res))
+	}
+}
+
+func TestMCPToolsEditItemRejectsPurchasePriceOutOfRange(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Edit Price Range Storage"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Edit Price Range Widget", "storage": "MCP Test Edit Price Range Storage",
+	}, &item)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
+
+	tooLarge := 1e12
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "edit_item",
+		Arguments: map[string]any{"item": "MCP Test Edit Price Range Widget", "purchase_price": tooLarge},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected an out-of-range error, got success: %s", textOf(t, res))
+	}
+	if !strings.Contains(textOf(t, res), "purchase_price") || strings.Contains(textOf(t, res), "internal error") {
+		t.Fatalf("expected a clear purchase_price error, not an internal error, got %q", textOf(t, res))
+	}
+}
+
+// TestMCPToolsEditLocationRejectsCaseVariantDuplicate is
+// TestMCPToolsAddLocationRejectsCaseVariantDuplicate's edit_location
+// sibling, flagged as untested during review.
+func TestMCPToolsEditLocationRejectsCaseVariantDuplicate(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var a, b addLocationOutput
+	callTool(t, cs, "add_location", map[string]any{"name": "MCP Test Edit Dup A"}, &a)
+	callTool(t, cs, "add_location", map[string]any{"name": "MCP Test Edit Dup B"}, &b)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE name LIKE 'MCP Test %'`) })
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "edit_location",
+		Arguments: map[string]any{"location": "MCP Test Edit Dup B", "name": "mcp test edit dup a"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected a duplicate-name error when renaming onto an existing name, got success: %s", textOf(t, res))
 	}
 }
