@@ -2,7 +2,7 @@
 // included, since that's what the real JSON API will return — no translation layer
 // to maintain when Phase 3 swaps lib/api.ts's mock bodies for real fetch() calls.
 
-export interface Location {
+export interface Storage {
 	id: number;
 	parent_id: number | null;
 	owner_id: number | null;
@@ -12,11 +12,27 @@ export interface Location {
 	photo_url: string | null;
 	notes: string | null;
 	created_at: string;
+	/** Real column — non-null only on a root storage (nested storages inherit
+	 * their location transitively via the breadcrumb instead, §3). */
+	location_id: number | null;
+	/** Only ever populated by getStorages() (a LEFT JOIN server-side) — every
+	 * other call returns location_id alone. */
+	location_name?: string | null;
+}
+
+/** A flat, non-nested physical property (House, Garage, Parent's House) that
+ * a root-level Storage can optionally belong to (architecture plan §3). */
+export interface Location {
+	id: number;
+	owner_id: number | null;
+	is_shared: boolean;
+	name: string;
+	created_at: string;
 }
 
 export interface Item {
 	id: number;
-	location_id: number;
+	storage_id: number;
 	owner_id: number | null;
 	is_shared: boolean;
 	name: string;
@@ -48,25 +64,28 @@ export interface User {
 }
 
 /** Root-to-node path, per the recursive breadcrumb query in architecture plan §3. */
-export type Breadcrumb = Pick<Location, 'id' | 'name'>[];
+export type Breadcrumb = Pick<Storage, 'id' | 'name'>[];
 
 export interface SearchSuggestion {
-	kind: 'item' | 'location' | 'tag';
+	kind: 'item' | 'storage' | 'tag';
 	id: number;
 	name: string;
 	score: number;
 	/** Present on item hits only (architecture plan §5/§7) — avoids a second lookup. */
-	location_id?: number;
+	storage_id?: number;
+	/** Present on both item and storage hits — two root storages can share a
+	 * name across different Locations (§3), so a storage hit needs this too
+	 * to stay distinguishable in a suggestion list. */
 	breadcrumb?: string;
 }
 
 export type ScanResult =
 	| { kind: 'item'; items: Item[] }
-	| { kind: 'location'; location: Location }
+	| { kind: 'storage'; storage: Storage }
 	| { kind: 'none' };
 
-export type ResolveLocationResult =
-	| { kind: 'location'; location_id: number }
+export type ResolveStorageResult =
+	| { kind: 'storage'; storage_id: number }
 	| { kind: 'items'; items: Item[] } // ambiguous: caller shows the short picker (§6/§7)
 	| { kind: 'none' };
 

@@ -1,12 +1,13 @@
 <script lang="ts">
-	// Add Object flow (architecture plan §8): Location Picker is required and comes
+	// Add Object flow (architecture plan §8): Storage Picker is required and comes
 	// first — you're usually standing next to where the thing lives when you add it.
 	// Everything else is optional at creation, editable later.
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { createItem, createTag, getLocation, getTags } from '$lib/api';
+	import { createItem, createTag, getStorage, getTags } from '$lib/api';
 	import type { Tag } from '$lib/types';
-	import LocationPicker from '$lib/components/location-picker.svelte';
+	import StoragePicker from '$lib/components/storage-picker.svelte';
+	import PhotoUpload from '$lib/components/photo-upload.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Card from '$lib/components/ui/card';
@@ -27,24 +28,24 @@
 	// stale ?code= again if that ever changed and make it the next item's code.
 	let scannedCode = $state(page.url.searchParams.get('code'));
 
-	let locationId = $state<number | null>(null);
+	let storageId = $state<number | null>(null);
 	let breadcrumb = $state('');
 
 	// Arrives from the "+ Add new storage" link's round trip through
-	// /locations/new (?returnTo=/items/new) — the newly created location comes
-	// back as ?locationId= instead of making the user pick it again. Fire-and-forget
+	// /storages/new (?returnTo=/items/new) — the newly created storage comes
+	// back as ?storageId= instead of making the user pick it again. Fire-and-forget
 	// like getTags() below; same one-time-capture reasoning as scannedCode above.
-	const returnedLocationId = page.url.searchParams.get('locationId');
-	if (returnedLocationId) {
-		getLocation(Number(returnedLocationId)).then(({ location, breadcrumb: path }) => {
-			locationId = location.id;
+	const returnedStorageId = page.url.searchParams.get('storageId');
+	if (returnedStorageId) {
+		getStorage(Number(returnedStorageId)).then(({ storage, breadcrumb: path }) => {
+			storageId = storage.id;
 			breadcrumb = path.map((p) => p.name).join(' > ');
 		});
 	}
 
-	// One visit to a location often means storing several different objects
+	// One visit to a storage often means storing several different objects
 	// (feedback 2026-09-17) — each "draft" is one object's own name/quantity/
-	// description/tags, all sharing the single locationId chosen in step 1.
+	// description/tags, all sharing the single storageId chosen in step 1.
 	type Draft = {
 		id: number;
 		name: string;
@@ -52,11 +53,12 @@
 		description: string;
 		// Kept as raw input strings, not Item's typed condition/purchase_date/
 		// purchase_price — these are optional (architecture plan §8: everything
-		// but location is optional at creation), so '' is "not set" and parsed
+		// but storage is optional at creation), so '' is "not set" and parsed
 		// to null/number only at submit time rather than forcing a default.
 		condition: string;
 		purchaseDate: string;
 		purchasePrice: string;
+		photoUrl: string | null;
 		tags: Set<string>;
 		tagQuery: string;
 		tagOpen: boolean;
@@ -72,6 +74,7 @@
 			condition: '',
 			purchaseDate: '',
 			purchasePrice: '',
+			photoUrl: null,
 			tags: new Set(),
 			tagQuery: '',
 			tagOpen: false
@@ -174,14 +177,14 @@
 		// SvelteKit may reuse this component instance across navigations back to the
 		// same route — nothing clears these on its own, so a second add in one
 		// session would otherwise start pre-filled with the previous item's data.
-		locationId = null;
+		storageId = null;
 		breadcrumb = '';
 		drafts = [makeDraft()];
 	}
 
 	async function submit() {
-		if (locationId == null) return;
-		const targetLocationId = locationId;
+		if (storageId == null) return;
+		const targetStorageId = storageId;
 		const toCreate = drafts.filter((d) => d.name.trim());
 		if (toCreate.length === 0) return;
 		submitting = true;
@@ -194,12 +197,13 @@
 				created.push(
 					await createItem({
 						name: draft.name.trim(),
-						location_id: targetLocationId,
+						storage_id: targetStorageId,
 						quantity: Number(draft.quantity) || 1,
 						description: draft.description.trim() || null,
 						condition: draft.condition.trim() || null,
 						purchase_date: draft.purchaseDate || null,
 						purchase_price: priceInput && !Number.isNaN(parsedPrice) ? parsedPrice : null,
+						photo_url: draft.photoUrl,
 						tags: [...draft.tags],
 						// One physical scan corresponds to one physical object, even
 						// when several different objects are stored in the same visit
@@ -214,7 +218,7 @@
 			if (created.length === 1) {
 				await goto(`/items/${created[0].id}`);
 			} else {
-				await goto(`/locations/${targetLocationId}`);
+				await goto(`/storages/${targetStorageId}`);
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to store object(s).';
@@ -231,11 +235,11 @@
 		<Card.Content class="flex flex-col gap-3 p-0">
 			<div class="flex items-center justify-between gap-2">
 				<p class="text-sm font-medium">Step 1: choose where you'd like to store it</p>
-				{#if locationId == null}
+				{#if storageId == null}
 					<Button
 						variant="link"
 						size="sm"
-						href={`/locations/new?returnTo=${encodeURIComponent(
+						href={`/storages/new?returnTo=${encodeURIComponent(
 							scannedCode ? `/items/new?code=${encodeURIComponent(scannedCode)}` : '/items/new'
 						)}`}
 					>
@@ -243,11 +247,11 @@
 					</Button>
 				{/if}
 			</div>
-			<LocationPicker bind:locationId bind:breadcrumb />
+			<StoragePicker bind:storageId bind:breadcrumb />
 		</Card.Content>
 	</Card.Root>
 
-	{#if locationId != null}
+	{#if storageId != null}
 		<Card.Root variant="glass" class="p-4">
 			<Card.Content class="flex flex-col gap-4 p-0">
 				<p class="text-sm font-medium">Step 2: add the details</p>
@@ -295,6 +299,11 @@
 								rows="3"
 								class="border-input focus-visible:border-ring focus-visible:ring-ring/50 rounded-md border bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:ring-3"
 							></textarea>
+						</div>
+
+						<div class="flex flex-col gap-1.5">
+							<span class="text-sm font-medium">Photo</span>
+							<PhotoUpload bind:photoUrl={draft.photoUrl} />
 						</div>
 
 						<div class="flex flex-col gap-1.5">

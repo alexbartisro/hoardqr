@@ -1,5 +1,5 @@
 <script lang="ts">
-	// Shared camera-scanning primitive (html5-qrcode), used by both the Location
+	// Shared camera-scanning primitive (html5-qrcode), used by both the Storage
 	// Picker's Scan tab and the /scan route (§6) — extracted here once a second
 	// consumer needed it, rather than duplicating the html5-qrcode wiring.
 	import { Button } from '$lib/components/ui/button';

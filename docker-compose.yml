@@ -5,13 +5,38 @@ services:
     command: ["serve"]
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://hoardqr:${DB_PASSWORD}@hoardqr-db:5432/hoardqr
+      # sslmode=disable is required, not cosmetic — and NOT a "we turned off
+      # security" choice, despite how it reads. hoardqr-db (postgres:16-alpine)
+      # simply has no SSL configured (no certs, no ssl=on) — normal for a
+      # container reachable only over this private Compose network, never the
+      # public internet. Every other Postgres client (psql, psycopg2, JDBC —
+      # anything linking real libpq) defaults to sslmode=prefer against a
+      # server like that: try SSL, silently fall back to plaintext, connect
+      # fine, no config needed. Go's lib/pq is the outlier — its own docs
+      # (doc.go) admit its default is "require", which is NOT libpq's
+      # default, and it fails outright instead of falling back:
+      # "pq: SSL is not enabled on the server". golang-migrate's postgres
+      # driver (used once at startup by db.Migrate, not by the app's own
+      # connection pool — that's pgx, which does default to "prefer" like
+      # everything else) pulls in lib/pq, so it's the one thing here that
+      # actually needs sslmode spelled out explicitly. Without this,
+      # `docker logs -f` shows "database connected" (pgx succeeding)
+      # immediately followed by "running migrations" failing, forever, on
+      # every restart — a real outage this project hit once already.
+      DATABASE_URL: postgres://hoardqr:${DB_PASSWORD}@hoardqr-db:5432/hoardqr?sslmode=disable
       AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
       SESSION_SECRET: ${SESSION_SECRET}
     ports:
       - "8080:8080"
     volumes:
-      - ./uploads:/data/uploads
+      # HOST_UPLOADS_DIR is where photo uploads live on the host, not inside
+      # the container — defaults to ./uploads next to this compose file if
+      # unset, so existing deployments need no change. Set it if you keep all
+      # your containers' data under one shared path (e.g. /srv/docker-data/...),
+      # the way most other self-hosted compose files let you. Not to be
+      # confused with UPLOAD_DIR (internal/config), which is the *container's
+      # own* path and stays /data/uploads here regardless.
+      - ${HOST_UPLOADS_DIR:-./uploads}:/data/uploads
     depends_on:
       hoardqr-db:
         condition: service_healthy
@@ -22,7 +47,9 @@ services:
     command: ["mcp"]
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://hoardqr:${DB_PASSWORD}@hoardqr-db:5432/hoardqr
+      # See the hoardqr service's DATABASE_URL comment above — same fix,
+      # same reason (this run mode also calls db.Migrate at startup).
+      DATABASE_URL: postgres://hoardqr:${DB_PASSWORD}@hoardqr-db:5432/hoardqr?sslmode=disable
       MCP_API_TOKEN: ${MCP_API_TOKEN}
     ports:
       - "8081:8081"
@@ -39,7 +66,9 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: hoardqr
     volumes:
-      - ./pgdata:/var/lib/postgresql/data
+      # HOST_PGDATA_DIR — same idea as HOST_UPLOADS_DIR above: where Postgres's
+      # own data directory lives on the host, defaulting to ./pgdata if unset.
+      - ${HOST_PGDATA_DIR:-./pgdata}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hoardqr"]
       interval: 5s

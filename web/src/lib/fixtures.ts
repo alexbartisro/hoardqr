@@ -1,10 +1,10 @@
-import type { Item, Location, Tag, User } from './types';
+import type { Item, Storage, Tag, User } from './types';
 
-// A handful of realistic locations/items shaped exactly like the §3 schema, per the
+// A handful of realistic storages/items shaped exactly like the §3 schema, per the
 // development plan's Phase 2 step 2. api.ts clones these at import time and mutates
 // the clone — reload the app to reset back to this seed state.
 
-export const LOCATIONS: Location[] = [
+export const STORAGES: Storage[] = [
 	{
 		id: 1,
 		parent_id: null,
@@ -14,6 +14,7 @@ export const LOCATIONS: Location[] = [
 		qr_token: 'H4K9P2',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-05T09:00:00Z'
 	},
 	{
@@ -25,6 +26,7 @@ export const LOCATIONS: Location[] = [
 		qr_token: '8f2a91c4e7',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-05T09:05:00Z'
 	},
 	{
@@ -36,6 +38,7 @@ export const LOCATIONS: Location[] = [
 		qr_token: '3d7b5e19a2',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-05T09:06:00Z'
 	},
 	{
@@ -47,6 +50,7 @@ export const LOCATIONS: Location[] = [
 		qr_token: 'b91f4c0a6d',
 		photo_url: null,
 		notes: 'Electronics odds and ends',
+		location_id: null,
 		created_at: '2026-01-05T09:07:00Z'
 	},
 	{
@@ -58,6 +62,7 @@ export const LOCATIONS: Location[] = [
 		qr_token: 'R5T8W3',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-06T10:00:00Z'
 	},
 	{
@@ -69,6 +74,7 @@ export const LOCATIONS: Location[] = [
 		qr_token: '0e4a7f2c19',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-06T10:10:00Z'
 	},
 	{
@@ -80,6 +86,7 @@ export const LOCATIONS: Location[] = [
 		qr_token: '9c3e8b41f0',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-07T11:00:00Z'
 	},
 	{
@@ -91,6 +98,7 @@ export const LOCATIONS: Location[] = [
 		qr_token: '5a1d9e7c3b',
 		photo_url: null,
 		notes: null,
+		location_id: null,
 		created_at: '2026-01-07T11:05:00Z'
 	}
 ];
@@ -98,7 +106,7 @@ export const LOCATIONS: Location[] = [
 export const ITEMS: Item[] = [
 	{
 		id: 101,
-		location_id: 4,
+		storage_id: 4,
 		owner_id: 1,
 		is_shared: true,
 		name: 'Multimeter',
@@ -117,7 +125,7 @@ export const ITEMS: Item[] = [
 	},
 	{
 		id: 102,
-		location_id: 6,
+		storage_id: 6,
 		owner_id: 1,
 		is_shared: true,
 		name: 'Cordless Drill',
@@ -136,7 +144,7 @@ export const ITEMS: Item[] = [
 	},
 	{
 		id: 103,
-		location_id: 8,
+		storage_id: 8,
 		owner_id: 1,
 		is_shared: true,
 		name: 'HDMI Cable',
@@ -155,7 +163,7 @@ export const ITEMS: Item[] = [
 	},
 	{
 		id: 104,
-		location_id: 2,
+		storage_id: 2,
 		owner_id: 1,
 		is_shared: true,
 		name: 'HDMI Cable',
@@ -174,7 +182,7 @@ export const ITEMS: Item[] = [
 	},
 	{
 		id: 105,
-		location_id: 2,
+		storage_id: 2,
 		owner_id: 1,
 		is_shared: true,
 		name: 'Christmas Lights',
@@ -193,7 +201,7 @@ export const ITEMS: Item[] = [
 	},
 	{
 		id: 106,
-		location_id: 7,
+		storage_id: 7,
 		owner_id: 1,
 		is_shared: false, // per-object sharing (§10) — stays private even though the room isn't
 		name: 'Passport',

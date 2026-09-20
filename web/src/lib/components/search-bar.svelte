@@ -1,8 +1,8 @@
 <script lang="ts">
-	// Global search (architecture plan §5) — same searchSuggest() the Location
+	// Global search (architecture plan §5) — same searchSuggest() the Storage
 	// Picker's Type tab and the MCP find_items tool use. Tag hits show for
 	// discoverability but aren't clickable yet: there's no tag-filtered browse
-	// route (only item/location detail pages exist so far) — rendered as a
+	// route (only item/storage detail pages exist so far) — rendered as a
 	// visually distinct chip, not a row, so it doesn't invite a click.
 	import { goto } from '$app/navigation';
 	import { searchSuggest } from '$lib/api';
@@ -37,6 +37,16 @@
 					suggestions = result;
 					searchedQuery = q;
 				}
+			} catch {
+				// Without this, a failed request left `searchedQuery` stale and
+				// `searching` never cleared for this query — the dropdown showed
+				// "Searching…" forever. Degrade to a quiet "no results" instead of
+				// a visible error, since this is a compact autocomplete, not a
+				// full page — the header search bar remains usable either way.
+				if (seq === searchSeq) {
+					suggestions = [];
+					searchedQuery = q;
+				}
 			} finally {
 				if (seq === searchSeq) searching = false;
 			}
@@ -49,7 +59,7 @@
 		open = false;
 		query = '';
 		suggestions = [];
-		goto(s.kind === 'item' ? `/items/${s.id}` : `/locations/${s.id}`);
+		goto(s.kind === 'item' ? `/items/${s.id}` : `/storages/${s.id}`);
 	}
 
 	// Closing on a plain `onblur` from the input breaks keyboard use — Tab-ing
@@ -57,6 +67,20 @@
 	// button can receive focus. Checking `relatedTarget` against the container
 	// lets focus move between the input and its own results without closing,
 	// while still closing when focus leaves to anywhere else (click or Tab).
+	//
+	// This alone isn't enough for touch, though (regression found 2026-09-19:
+	// tapping a storage result did nothing) — mobile Safari doesn't move
+	// focus to a `<button>` on tap (a long-standing WebKit quirk), so a tap
+	// blurs the input with `relatedTarget: null`, `handleFocusOut` reads that
+	// as "focus left the container" and closes the dropdown, and the
+	// now-removed button's `click` never fires. `onmousedown` +
+	// `preventDefault()` on each result button (below) stops the input from
+	// blurring at all on press — the standard fix every accessible combobox
+	// uses, and it doesn't touch the keyboard path above (Tab still moves
+	// focus normally; only a pointer press on a result is intercepted).
+	// CLAUDE.md previously said this workaround wasn't needed here — that
+	// was true for the mouse-click testing it was verified with, not for a
+	// real touch device.
 	let container: HTMLDivElement | undefined;
 	function handleFocusOut(e: FocusEvent) {
 		if (!container?.contains(e.relatedTarget as Node | null)) open = false;
@@ -64,7 +88,7 @@
 </script>
 
 <div class="relative ml-auto w-full max-w-xs" bind:this={container} onfocusout={handleFocusOut}>
-	<Input placeholder="Search items, locations, tags…" bind:value={query} onfocus={() => (open = true)} />
+	<Input placeholder="Search items, storages, tags…" bind:value={query} onfocus={() => (open = true)} />
 	{#if open && query.trim()}
 		<div class="glass-panel absolute top-full left-0 z-20 mt-1 w-full rounded-md p-1">
 			{#if searching || query.trim() !== searchedQuery}
@@ -83,6 +107,7 @@
 								<button
 									type="button"
 									class="hover:bg-accent w-full rounded-md px-2 py-1.5 text-left text-sm"
+									onmousedown={(e) => e.preventDefault()}
 									onclick={() => select(s)}
 								>
 									{s.name}

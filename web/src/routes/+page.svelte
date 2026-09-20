@@ -1,33 +1,55 @@
 <script lang="ts">
 	import * as Card from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
 	import Package from '@lucide/svelte/icons/package';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
-	import { getRecentItems } from '$lib/api';
-	import type { Item } from '$lib/types';
+	import Folder from '@lucide/svelte/icons/folder';
+	import { getRecentItems, getStorages } from '$lib/api';
+	import type { Item, Storage } from '$lib/types';
 
-	const PAGE_SIZE = 10;
+	// Both previews are teasers, not full browsers — "See all" hands off to
+	// /storages and /items (the tab bar's own destinations), which is where
+	// the dashboard's old paginated Recent feed moved to. Capped small on
+	// purpose: this is a glance, not the primary way to browse either list
+	// anymore.
+	const RECENT_PREVIEW_SIZE = 5;
+	const STORAGE_PREVIEW_SIZE = 6;
 
-	let page = $state(1);
-	let entries = $state<{ item: Item; breadcrumb: string }[]>([]);
-	let total = $state(0);
-	let loading = $state(true);
+	let recentEntries = $state<{ item: Item; breadcrumb: string }[]>([]);
+	let recentTotal = $state(0);
+	let recentLoading = $state(true);
+	let recentError = $state<string | null>(null);
 
-	// See CLAUDE.md's note on this pattern.
-	let loadSeq = 0;
+	let roots = $state<Storage[]>([]);
+	let rootsLoading = $state(true);
+	let rootsError = $state<string | null>(null);
+
 	$effect(() => {
-		const p = page;
-		const seq = ++loadSeq;
-		loading = true;
-		getRecentItems({ page: p, pageSize: PAGE_SIZE }).then((res) => {
-			if (seq !== loadSeq) return;
-			entries = res.entries;
-			total = res.total;
-			loading = false;
-		});
+		getRecentItems({ page: 1, pageSize: RECENT_PREVIEW_SIZE })
+			.then((res) => {
+				recentEntries = res.entries;
+				recentTotal = res.total;
+			})
+			.catch((e) => {
+				recentError = e instanceof Error ? e.message : 'Failed to load recent items.';
+			})
+			.finally(() => {
+				recentLoading = false;
+			});
+		// Root storages for a home inventory are structurally few (rooms/areas,
+		// not hundreds) — there's no paginated storages endpoint, so fetching
+		// all of them and slicing client-side is the right call here, not a
+		// shortcut around missing pagination.
+		getStorages()
+			.then((storages) => {
+				roots = storages;
+			})
+			.catch((e) => {
+				rootsError = e instanceof Error ? e.message : 'Failed to load storages.';
+			})
+			.finally(() => {
+				rootsLoading = false;
+			});
 	});
-
-	let totalPages = $derived(Math.max(1, Math.ceil(total / PAGE_SIZE)));
 
 	function formatDate(iso: string): string {
 		const d = new Date(iso);
@@ -38,39 +60,70 @@
 </script>
 
 <div class="flex flex-col gap-4">
-	<a href="/items/new" class="block">
-		<Card.Root variant="glass" class="transition-transform active:scale-[0.98]">
-			<Card.Content class="flex flex-row items-center gap-4">
-				<Package class="text-primary size-8" />
-				<div>
-					<Card.Title>Add Object</Card.Title>
-					<Card.Description>Catalog something new and place it in a location.</Card.Description>
-				</div>
-			</Card.Content>
-		</Card.Root>
-	</a>
+	<div class="grid grid-cols-2 gap-3">
+		<a href="/items/new" class="block">
+			<Card.Root variant="glass" class="transition-transform active:scale-[0.98]">
+				<Card.Content class="flex flex-col items-center gap-2 py-2 text-center">
+					<Package class="text-primary size-7" />
+					<Card.Title class="text-sm">Add Object</Card.Title>
+				</Card.Content>
+			</Card.Root>
+		</a>
 
-	<a href="/locations/new" class="block">
-		<Card.Root variant="glass" class="transition-transform active:scale-[0.98]">
-			<Card.Content class="flex flex-row items-center gap-4">
-				<FolderPlus class="text-primary size-8" />
-				<div>
-					<Card.Title>Add Storage</Card.Title>
-					<Card.Description>Create a new box, shelf, or other storage location.</Card.Description>
-				</div>
-			</Card.Content>
-		</Card.Root>
-	</a>
+		<a href="/storages/new" class="block">
+			<Card.Root variant="glass" class="transition-transform active:scale-[0.98]">
+				<Card.Content class="flex flex-col items-center gap-2 py-2 text-center">
+					<FolderPlus class="text-primary size-7" />
+					<Card.Title class="text-sm">Add Storage</Card.Title>
+				</Card.Content>
+			</Card.Root>
+		</a>
+	</div>
 
 	<div class="mt-2 flex flex-col gap-2">
-		<h2 class="text-muted-foreground text-sm font-medium">Recent</h2>
+		<div class="flex items-center justify-between">
+			<h2 class="text-muted-foreground text-sm font-medium">Storage</h2>
+			{#if roots.length > STORAGE_PREVIEW_SIZE}
+				<a href="/storages" class="text-primary text-xs hover:underline">See all →</a>
+			{/if}
+		</div>
 
-		{#if loading}
+		{#if rootsLoading}
 			<p class="text-muted-foreground text-sm">Loading…</p>
-		{:else if entries.length === 0}
+		{:else if rootsError}
+			<p class="text-destructive text-sm">{rootsError}</p>
+		{:else if roots.length === 0}
+			<p class="text-muted-foreground text-sm">No storage yet.</p>
+		{:else}
+			{#each roots.slice(0, STORAGE_PREVIEW_SIZE) as storage (storage.id)}
+				<a href="/storages/{storage.id}" class="block">
+					<Card.Root variant="glass" class="p-3">
+						<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
+							<Folder class="text-muted-foreground size-4 shrink-0" />
+							<span class="truncate">{storage.name}</span>
+						</Card.Content>
+					</Card.Root>
+				</a>
+			{/each}
+		{/if}
+	</div>
+
+	<div class="mt-2 flex flex-col gap-2">
+		<div class="flex items-center justify-between">
+			<h2 class="text-muted-foreground text-sm font-medium">Recent</h2>
+			{#if recentTotal > RECENT_PREVIEW_SIZE}
+				<a href="/items" class="text-primary text-xs hover:underline">See all →</a>
+			{/if}
+		</div>
+
+		{#if recentLoading}
+			<p class="text-muted-foreground text-sm">Loading…</p>
+		{:else if recentError}
+			<p class="text-destructive text-sm">{recentError}</p>
+		{:else if recentEntries.length === 0}
 			<p class="text-muted-foreground text-sm">No items yet.</p>
 		{:else}
-			{#each entries as { item, breadcrumb } (item.id)}
+			{#each recentEntries as { item, breadcrumb } (item.id)}
 				<a href="/items/{item.id}" class="block">
 					<Card.Root variant="glass" class="p-3">
 						<Card.Content class="flex flex-row items-center justify-between gap-2 p-0 text-sm">
@@ -83,18 +136,6 @@
 					</Card.Root>
 				</a>
 			{/each}
-
-			{#if totalPages > 1}
-				<div class="flex items-center justify-between pt-1">
-					<Button variant="outline" size="sm" disabled={page <= 1} onclick={() => (page -= 1)}>
-						Previous
-					</Button>
-					<span class="text-muted-foreground text-xs">Page {page} of {totalPages}</span>
-					<Button variant="outline" size="sm" disabled={page >= totalPages} onclick={() => (page += 1)}>
-						Next
-					</Button>
-				</div>
-			{/if}
 		{/if}
 	</div>
 </div>

@@ -1,6 +1,6 @@
 <script lang="ts">
 	// /scan (architecture plan §6): four outcomes for a decoded code — one item
-	// match, several items sharing the code (a short picker), a location match,
+	// match, several items sharing the code (a short picker), a storage match,
 	// or nothing (offer to create new here, pre-filled with the scanned code).
 	import { goto } from '$app/navigation';
 	import { scan } from '$lib/api';
@@ -12,11 +12,13 @@
 	let resolving = $state(false);
 	let pickerItems = $state<Item[] | null>(null);
 	let notFoundCode = $state<string | null>(null);
+	let scanError = $state<string | null>(null);
 
 	async function handleDecode(code: string) {
 		resolving = true;
 		pickerItems = null;
 		notFoundCode = null;
+		scanError = null;
 		try {
 			const result = await scan(code);
 			if (result.kind === 'item') {
@@ -28,11 +30,16 @@
 				} else {
 					pickerItems = result.items; // several items share this code — let the user pick
 				}
-			} else if (result.kind === 'location') {
-				await goto(`/locations/${result.location.id}`);
+			} else if (result.kind === 'storage') {
+				await goto(`/storages/${result.storage.id}`);
 			} else {
 				notFoundCode = code;
 			}
+		} catch (e) {
+			// Without this, a failed /api/scan call (network blip, 500) silently
+			// dropped back to the scanner with no indication anything went wrong
+			// — the decoded code was just lost.
+			scanError = e instanceof Error ? e.message : 'Failed to look up that code.';
 		} finally {
 			resolving = false;
 		}
@@ -41,6 +48,7 @@
 	function reset() {
 		pickerItems = null;
 		notFoundCode = null;
+		scanError = null;
 	}
 </script>
 
@@ -49,6 +57,13 @@
 
 	{#if resolving}
 		<p class="text-muted-foreground text-sm">Looking up…</p>
+	{:else if scanError}
+		<Card.Root variant="glass" class="p-4">
+			<Card.Content class="flex flex-col gap-3 p-0">
+				<p class="text-destructive text-sm">{scanError}</p>
+				<Button variant="ghost" size="sm" class="self-start" onclick={reset}>Scan again</Button>
+			</Card.Content>
+		</Card.Root>
 	{:else if pickerItems}
 		<Card.Root variant="glass" class="p-4">
 			<Card.Content class="flex flex-col gap-1 p-0">
@@ -67,12 +82,12 @@
 	{:else if notFoundCode}
 		<Card.Root variant="glass" class="p-4">
 			<Card.Content class="flex flex-col gap-3 p-0">
-				<p class="text-sm">No item or location uses code "{notFoundCode}".</p>
+				<p class="text-sm">No item or storage uses code "{notFoundCode}".</p>
 				<div class="flex flex-wrap gap-2">
 					<Button onclick={() => goto(`/items/new?code=${encodeURIComponent(notFoundCode!)}`)}>
 						Create item here
 					</Button>
-					<Button variant="outline" onclick={() => goto(`/locations/new?code=${encodeURIComponent(notFoundCode!)}`)}>
+					<Button variant="outline" onclick={() => goto(`/storages/new?code=${encodeURIComponent(notFoundCode!)}`)}>
 						Create storage here
 					</Button>
 				</div>
