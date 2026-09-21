@@ -12,11 +12,21 @@ import (
 )
 
 const countItems = `-- name: CountItems :one
-SELECT count(*) FROM items
+SELECT count(*) FROM items i
+WHERE (
+  $1::text IS NULL OR EXISTS (
+    SELECT 1 FROM item_tags it2
+    JOIN tags t2 ON t2.id = it2.tag_id
+    WHERE it2.item_id = i.id AND lower(t2.name) = lower($1)
+  )
+)
 `
 
-func (q *Queries) CountItems(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countItems)
+// `tag` mirrors ListRecentItems' own optional case-insensitive filter — the
+// dashboard/`/items` page's `total` must reflect the same filter its rows
+// do, or pagination math goes wrong the moment a tag filter is active.
+func (q *Queries) CountItems(ctx context.Context, tag *string) (int64, error) {
+	row := q.db.QueryRow(ctx, countItems, tag)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -430,12 +440,20 @@ SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.qua
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
+WHERE (
+  $1::text IS NULL OR EXISTS (
+    SELECT 1 FROM item_tags it2
+    JOIN tags t2 ON t2.id = it2.tag_id
+    WHERE it2.item_id = i.id AND lower(t2.name) = lower($1)
+  )
+)
 GROUP BY i.id
 ORDER BY i.created_at DESC
-LIMIT $2::bigint OFFSET $1::bigint
+LIMIT $3::bigint OFFSET $2::bigint
 `
 
 type ListRecentItemsParams struct {
+	Tag        *string
 	PageOffset int64
 	PageLimit  int64
 }
@@ -461,14 +479,23 @@ type ListRecentItemsRow struct {
 }
 
 // Backs getRecentItems (not in §9 — see CLAUDE.md's "Mock API surface"
-// notes): the dashboard's newest-first feed. limit/offset are explicitly
-// ::bigint (not left to default inference) so the generated Go params are
-// int64 — ItemsHandler.listRecent computes offset as int64 specifically to
-// avoid an int32 overflow wrapping a large page/pageSize into a negative
-// offset, which Postgres would then reject with a generic error instead of
-// a clean 400.
+// notes): the dashboard's newest-first feed and /items's browse page.
+// limit/offset are explicitly ::bigint (not left to default inference) so
+// the generated Go params are int64 — ItemsHandler.listRecent computes
+// offset as int64 specifically to avoid an int32 overflow wrapping a large
+// page/pageSize into a negative offset, which Postgres would then reject
+// with a generic error instead of a clean 400. `tag` is an optional exact
+// match (added 2026-09-21 so the header search bar's tag suggestions are
+// actually clickable — see CLAUDE.md). Case-insensitive, unlike ListItems's
+// own `tag` filter above (which has no UI caller and predates this one) —
+// this filter is now reachable straight from a URL (?tag=, hand-editable or
+// bookmarkable), and every other tag comparison in the app is already
+// case-insensitive (GetTagByNameCI, resolveTagIDs, tag-input.svelte's
+// hasExactMatch), so a byte-exact match here would be the one inconsistent
+// path — silently "no results" for a tag that demonstrably exists under a
+// different case.
 func (q *Queries) ListRecentItems(ctx context.Context, arg ListRecentItemsParams) ([]ListRecentItemsRow, error) {
-	rows, err := q.db.Query(ctx, listRecentItems, arg.PageOffset, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listRecentItems, arg.Tag, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}

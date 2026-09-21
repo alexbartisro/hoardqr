@@ -1,8 +1,17 @@
 <script lang="ts">
+	import { page as pageState } from '$app/state';
 	import { getRecentItems } from '$lib/api';
 	import type { Item } from '$lib/types';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
+
+	// Optional ?tag= filter (added 2026-09-21) — the header search bar's tag
+	// suggestions navigate here so they're actually clickable, instead of
+	// rendering as a dead-end chip (see search-bar.svelte and CLAUDE.md).
+	// $derived, not captured once: this page can be revisited with a
+	// different ?tag= without remounting (same component-reuse concern
+	// documented elsewhere for [id] routes).
+	let tag = $derived(pageState.url.searchParams.get('tag'));
 
 	// Built on getRecentItems, not getItems: it returns {item, breadcrumb}
 	// pairs (getItems doesn't include a breadcrumb at all), and it's
@@ -13,19 +22,32 @@
 	const PAGE_SIZE = 20;
 
 	let page = $state(1);
+
+	// Changing the tag filter (a fresh navigation to this same route with a
+	// different ?tag=) resets back to page 1 — otherwise landing here while
+	// already on page 3 would ask for page 3 of a different, likely much
+	// smaller, filtered result set.
+	$effect(() => {
+		tag;
+		page = 1;
+	});
 	let entries = $state<{ item: Item; breadcrumb: string }[]>([]);
 	let total = $state(0);
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 
-	// See CLAUDE.md's note on this pattern.
+	// See CLAUDE.md's note on this pattern. Keyed on both page and tag —
+	// changing the tag filter resets back to page 1 (below) but that's a
+	// separate write from this effect's own re-run, so both need to be
+	// tracked as dependencies here.
 	let loadSeq = 0;
 	$effect(() => {
 		const p = page;
+		const t = tag;
 		const seq = ++loadSeq;
 		loading = true;
 		loadError = null;
-		getRecentItems({ page: p, pageSize: PAGE_SIZE })
+		getRecentItems({ page: p, pageSize: PAGE_SIZE, tag: t ?? undefined })
 			.then((res) => {
 				if (seq !== loadSeq) return;
 				entries = res.entries;
@@ -57,13 +79,25 @@
 		<Button size="sm" href="/items/new">+ Add Object</Button>
 	</div>
 
+	{#if tag}
+		<div class="flex items-center gap-2 text-sm">
+			<span class="text-muted-foreground">Tagged</span>
+			<span class="bg-secondary text-secondary-foreground rounded-full px-3 py-1 text-xs">{tag}</span>
+			<a href="/items" class="text-primary hover:underline">Clear</a>
+		</div>
+	{/if}
+
 	{#if loading}
 		<p class="text-muted-foreground text-sm">Loading…</p>
 	{:else if loadError}
 		<p class="text-destructive text-sm">{loadError}</p>
 	{:else if entries.length === 0}
 		<p class="text-muted-foreground text-sm">
-			No items yet. <a href="/items/new" class="text-primary hover:underline">Add one →</a>
+			{#if tag}
+				No items tagged "{tag}".
+			{:else}
+				No items yet. <a href="/items/new" class="text-primary hover:underline">Add one →</a>
+			{/if}
 		</p>
 	{:else}
 		<div class="flex flex-col gap-2">

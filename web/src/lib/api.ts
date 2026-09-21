@@ -124,7 +124,7 @@ export async function getItems(params: { q?: string; tag?: string; storage_id?: 
 // --- GET /api/items?sort=created_desc&page=&pageSize= — not in §9's table. The
 // dashboard's newest-first feed (see CLAUDE.md's "Mock API surface beyond §9"). ---
 export async function getRecentItems(
-	params: { page?: number; pageSize?: number } = {}
+	params: { page?: number; pageSize?: number; tag?: string } = {}
 ): Promise<{ entries: { item: Item; breadcrumb: string }[]; total: number }> {
 	return apiFetch(`/api/items${queryString({ sort: 'created_desc', ...params })}`);
 }

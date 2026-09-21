@@ -597,3 +597,96 @@ func TestDeepestFirstBreadcrumb(t *testing.T) {
 		t.Fatalf("expected %q for a root-level item, got %q", want, got)
 	}
 }
+
+// TestRecentItemsFiltersByTag proves GET /api/items?sort=created_desc&tag=
+// filters both the returned rows and `total` consistently — added
+// 2026-09-21 so the header search bar's tag suggestions have somewhere
+// real to navigate to (see CLAUDE.md). Exact match only, matching
+// ListItems' own tag filter convention (not fuzzy).
+func TestRecentItemsFiltersByTag(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+	router := NewRouter(pool, t.TempDir())
+
+	storage, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "recent items tag filter root", QrToken: "RECENTTAG-LOC", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM items WHERE storage_id = $1`, storage.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, storage.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM tags WHERE name = 'recent-tag-filter-only'`)
+	})
+
+	tagged, err := q.InsertItem(ctx, store.InsertItemParams{
+		StorageID: storage.ID, Name: "recent tag filter tagged item", QrToken: codegen.PlainTextCode(),
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem(tagged): %v", err)
+	}
+	untagged, err := q.InsertItem(ctx, store.InsertItemParams{
+		StorageID: storage.ID, Name: "recent tag filter untagged item", QrToken: codegen.PlainTextCode(),
+		IsShared: true, Quantity: 1, CustomFields: []byte("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertItem(untagged): %v", err)
+	}
+
+	tag, err := q.InsertTag(ctx, "recent-tag-filter-only")
+	if err != nil {
+		t.Fatalf("InsertTag: %v", err)
+	}
+	if err := q.LinkItemTag(ctx, store.LinkItemTagParams{ItemID: tagged.ID, TagID: tag.ID}); err != nil {
+		t.Fatalf("LinkItemTag: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/items?sort=created_desc&tag=recent-tag-filter-only", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Entries []struct {
+			Item struct {
+				ID int64 `json:"id"`
+			} `json:"item"`
+		} `json:"entries"`
+		Total int64 `json:"total"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if body.Total != 1 {
+		t.Fatalf("expected total=1 for the tag filter, got %d", body.Total)
+	}
+	if len(body.Entries) != 1 || body.Entries[0].Item.ID != tagged.ID {
+		t.Fatalf("expected exactly the tagged item (%d), got %+v", tagged.ID, body.Entries)
+	}
+	for _, e := range body.Entries {
+		if e.Item.ID == untagged.ID {
+			t.Fatalf("untagged item %d leaked into a tag-filtered result", untagged.ID)
+		}
+	}
+
+	// Case-insensitive: every other tag comparison in the app already is
+	// (GetTagByNameCI, resolveTagIDs, tag-input.svelte's hasExactMatch), and
+	// this filter — unlike ListItems's own — is now reachable straight from
+	// a URL a caller could hand-edit or bookmark with different casing.
+	req = httptest.NewRequest(http.MethodGet, "/api/items?sort=created_desc&tag=RECENT-TAG-FILTER-ONLY", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for a case-variant tag, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if body.Total != 1 || len(body.Entries) != 1 || body.Entries[0].Item.ID != tagged.ID {
+		t.Fatalf("expected a case-variant tag to still match, got total=%d entries=%+v", body.Total, body.Entries)
+	}
+}

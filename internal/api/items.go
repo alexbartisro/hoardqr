@@ -120,6 +120,14 @@ func (h *ItemsHandler) listRecent(w http.ResponseWriter, r *http.Request) {
 	if pageSize > maxRecentItemsPageSize {
 		pageSize = maxRecentItemsPageSize
 	}
+	// Optional exact-match tag filter (added 2026-09-21 so the header search
+	// bar's tag suggestions are actually clickable — see CLAUDE.md). Empty
+	// string is treated as absent, matching queryString()'s own
+	// omit-empty-params convention on the frontend.
+	var tag *string
+	if raw := q.Get("tag"); raw != "" {
+		tag = &raw
+	}
 
 	// int64 (not int32) so (page-1)*pageSize doesn't overflow into a
 	// negative offset for a large page — Postgres would otherwise reject a
@@ -134,12 +142,13 @@ func (h *ItemsHandler) listRecent(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.q.ListRecentItems(r.Context(), store.ListRecentItemsParams{
 		PageLimit:  pageSize,
 		PageOffset: offset,
+		Tag:        tag,
 	})
 	if err != nil {
 		serverError(w, r, err)
 		return
 	}
-	total, err := h.q.CountItems(r.Context())
+	total, err := h.q.CountItems(r.Context(), tag)
 	if err != nil {
 		serverError(w, r, err)
 		return

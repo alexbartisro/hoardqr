@@ -1,9 +1,9 @@
 <script lang="ts">
 	// Global search (architecture plan §5) — same searchSuggest() the Storage
-	// Picker's Type tab and the MCP find_items tool use. Tag hits show for
-	// discoverability but aren't clickable yet: there's no tag-filtered browse
-	// route (only item/storage detail pages exist so far) — rendered as a
-	// visually distinct chip, not a row, so it doesn't invite a click.
+	// Picker's Type tab and the MCP find_items tool use. Tag hits navigate to
+	// /items?tag=<name> (added 2026-09-21, user bug report: the chip looked
+	// clickable but wasn't) — /items already supports exact tag filtering
+	// server-side (GET /api/items?sort=created_desc&tag=, see CLAUDE.md).
 	import { goto } from '$app/navigation';
 	import { searchSuggest } from '$lib/api';
 	import type { SearchSuggestion } from '$lib/types';
@@ -55,10 +55,13 @@
 	});
 
 	function select(s: SearchSuggestion) {
-		if (s.kind === 'tag') return;
 		open = false;
 		query = '';
 		suggestions = [];
+		if (s.kind === 'tag') {
+			goto(`/items?tag=${encodeURIComponent(s.name)}`);
+			return;
+		}
 		goto(s.kind === 'item' ? `/items/${s.id}` : `/storages/${s.id}`);
 	}
 
@@ -100,9 +103,17 @@
 					{#each suggestions as s (s.kind + s.id)}
 						<li>
 							{#if s.kind === 'tag'}
-								<span class="bg-muted text-muted-foreground m-1 inline-block rounded-full px-2 py-0.5 text-xs">
-									{s.name}
-								</span>
+								<button
+									type="button"
+									class="hover:bg-accent flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm"
+									onmousedown={(e) => e.preventDefault()}
+									onclick={() => select(s)}
+								>
+									<span class="bg-muted text-muted-foreground inline-block rounded-full px-2 py-0.5 text-xs">
+										{s.name}
+									</span>
+									<span class="text-muted-foreground text-xs">tag</span>
+								</button>
 							{:else}
 								<button
 									type="button"
