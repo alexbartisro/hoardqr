@@ -9,6 +9,8 @@
 	import PhotoUpload from '$lib/components/photo-upload.svelte';
 	import TagInput from '$lib/components/tag-input.svelte';
 	import { CONDITIONS } from '$lib/constants';
+	import Printer from '@lucide/svelte/icons/printer';
+	import Pencil from '@lucide/svelte/icons/pencil';
 
 	let item = $state<Item | null>(null);
 	let breadcrumb = $state<Breadcrumb>([]);
@@ -234,11 +236,21 @@
 			</div>
 		{/if}
 
+		<!-- Identity card: photo + name only, plus a demoted, divided action
+		     strip for Print label/Rename. Deliberately not Card.Action/
+		     grid-cols-[1fr_auto] (superseding the 2026-09-19 "the grid is
+		     already built in" note for this one case) — that grid is exactly
+		     what squeezed the name between two clusters of button chrome,
+		     reported live as "still pretty bad" after the first header
+		     redesign. Two full-width stacked rows instead: identity on top,
+		     secondary actions below a divider, so the name reads as the
+		     clear focal point rather than competing with two buttons on the
+		     same line. -->
 		<Card.Root variant="glass" class="p-4">
 			<Card.Header class="p-0">
-				<div class="flex items-start gap-4">
+				<div class="flex min-w-0 items-start gap-3">
 					<PhotoUpload bind:photoUrl={item.photo_url} onchange={handlePhotoChange} />
-					<div class="flex min-w-0 flex-1 flex-col gap-1 pt-1">
+					<div class="min-w-0 flex-1 pt-0.5">
 						{#if renaming}
 							<form
 								class="flex flex-col gap-1"
@@ -251,17 +263,18 @@
 									bind:ref={renameInput}
 									bind:value={renameValue}
 									disabled={savingRename}
+									class="text-base font-semibold"
 									onkeydown={(e) => e.key === 'Escape' && (renaming = false)}
 								/>
 								{#if renameError}<p class="text-destructive text-xs">{renameError}</p>{/if}
 							</form>
 						{:else}
-							<h1 class="text-xl font-semibold break-words">{item.name}</h1>
+							<h1 class="text-2xl leading-tight font-bold tracking-tight break-words">{item.name}</h1>
 						{/if}
-						{#if photoSaveError}<p class="text-destructive text-xs">{photoSaveError}</p>{/if}
+						{#if photoSaveError}<p class="text-destructive mt-1 text-xs">{photoSaveError}</p>{/if}
 					</div>
 				</div>
-				<Card.Action class="flex flex-wrap gap-2">
+				<div class="border-border/50 mt-3 flex items-center gap-2 border-t pt-3">
 					{#if renaming}
 						<Button size="sm" onclick={saveRename} disabled={savingRename}>
 							{savingRename ? 'Saving…' : 'Save'}
@@ -270,13 +283,23 @@
 							Cancel
 						</Button>
 					{:else}
-						<Button variant="outline" size="sm" href="/items/{item.id}/label">Print label</Button>
-						<Button variant="ghost" size="sm" onclick={startRename}>Rename</Button>
+						<Button variant="ghost" size="sm" href="/items/{item.id}/label">
+							<Printer /> Print label
+						</Button>
+						<Button variant="ghost" size="sm" onclick={startRename}>
+							<Pencil /> Rename
+						</Button>
 					{/if}
-				</Card.Action>
+				</div>
 			</Card.Header>
-			<div class="mt-4 flex items-center justify-between">
-				<span class="text-muted-foreground text-sm font-medium">Details</span>
+		</Card.Root>
+
+		<!-- Details card: separate panel from identity, per the same redesign
+		     — a title's card shouldn't also carry the growing pile of
+		     editable fields added since it was last touched. -->
+		<Card.Root variant="glass" class="p-4">
+			<div class="flex items-center justify-between">
+				<span class="text-muted-foreground text-xs font-medium tracking-wide uppercase">Details</span>
 				{#if !editingDetails}
 					<Button variant="ghost" size="sm" onclick={startEditDetails}>Edit</Button>
 				{/if}
@@ -410,20 +433,25 @@
 					{#if !item.is_shared}
 						<p class="text-muted-foreground">Private — not shared</p>
 					{/if}
+					{#if item.tags.length > 0}
+						<div class="mt-2 flex flex-wrap gap-2">
+							{#each item.tags as t (t)}
+								<span class="bg-secondary text-secondary-foreground rounded-full px-3 py-1 text-xs">{t}</span>
+							{/each}
+						</div>
+					{/if}
 				</Card.Content>
-				{#if item.tags.length > 0}
-					<div class="mt-4 flex flex-wrap gap-2">
-						{#each item.tags as t (t)}
-							<span class="bg-secondary text-secondary-foreground rounded-full px-3 py-1 text-xs">{t}</span>
-						{/each}
-					</div>
-				{/if}
 			{/if}
 		</Card.Root>
 
-		<div class="border-border/50 mt-2 flex flex-col items-start gap-2 border-t pt-4">
-			<Button variant="outline" href="/items/{item.id}/move">Move</Button>
-			<Button variant="destructive" onclick={handleDelete} disabled={deleting}>
+		<!-- Move is full-width (structural but reversible, benefits from a
+		     larger touch target); Delete stays intrinsic-width via self-start
+		     now that the container no longer stretches it — deliberate
+		     asymmetry, not a leftover: a full-width Delete would maximize the
+		     exact mis-click risk this footer already exists to avoid. -->
+		<div class="border-border/50 mt-2 flex flex-col gap-2 border-t pt-4">
+			<Button variant="outline" href="/items/{item.id}/move" class="w-full">Move</Button>
+			<Button variant="destructive" onclick={handleDelete} disabled={deleting} class="self-start">
 				{deleting ? 'Deleting…' : 'Delete'}
 			</Button>
 		</div>

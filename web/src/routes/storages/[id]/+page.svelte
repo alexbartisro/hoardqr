@@ -12,6 +12,11 @@
 	import { Input } from '$lib/components/ui/input';
 	import PhotoUpload from '$lib/components/photo-upload.svelte';
 	import LocationSelect from '$lib/components/location-select.svelte';
+	import Printer from '@lucide/svelte/icons/printer';
+	import Pencil from '@lucide/svelte/icons/pencil';
+	import Box from '@lucide/svelte/icons/box';
+	import Package from '@lucide/svelte/icons/package';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 
 	let storage = $state<Storage | null>(null);
 	let breadcrumb = $state<Breadcrumb>([]);
@@ -262,11 +267,21 @@
 			</div>
 		{/if}
 
+		<!-- Identity card: photo + name only, plus a demoted, divided action
+		     strip for Print label/Rename. Deliberately not Card.Action/
+		     grid-cols-[1fr_auto] (superseding the 2026-09-19 "the grid is
+		     already built in" note for this one case) — that grid is exactly
+		     what squeezed the name between two clusters of button chrome,
+		     reported live as "still pretty bad" after the first header
+		     redesign. Two full-width stacked rows instead: identity on top,
+		     secondary actions below a divider, so the name reads as the
+		     clear focal point rather than competing with two buttons on the
+		     same line. -->
 		<Card.Root variant="glass" class="p-4">
 			<Card.Header class="p-0">
-				<div class="flex items-start gap-4">
+				<div class="flex min-w-0 items-start gap-3">
 					<PhotoUpload bind:photoUrl={storage.photo_url} onchange={handlePhotoChange} />
-					<div class="flex min-w-0 flex-1 flex-col gap-1 pt-1">
+					<div class="min-w-0 flex-1 pt-0.5">
 						{#if renaming}
 							<form
 								class="flex flex-col gap-1"
@@ -279,17 +294,18 @@
 									bind:ref={renameInput}
 									bind:value={renameValue}
 									disabled={savingRename}
+									class="text-base font-semibold"
 									onkeydown={(e) => e.key === 'Escape' && (renaming = false)}
 								/>
 								{#if renameError}<p class="text-destructive text-xs">{renameError}</p>{/if}
 							</form>
 						{:else}
-							<h1 class="text-xl font-semibold break-words">{storage.name}</h1>
+							<h1 class="text-2xl leading-tight font-bold tracking-tight break-words">{storage.name}</h1>
 						{/if}
-						{#if photoSaveError}<p class="text-destructive text-xs">{photoSaveError}</p>{/if}
+						{#if photoSaveError}<p class="text-destructive mt-1 text-xs">{photoSaveError}</p>{/if}
 					</div>
 				</div>
-				<Card.Action class="flex flex-wrap gap-2">
+				<div class="border-border/50 mt-3 flex items-center gap-2 border-t pt-3">
 					{#if renaming}
 						<Button size="sm" onclick={saveRename} disabled={savingRename}>
 							{savingRename ? 'Saving…' : 'Save'}
@@ -298,14 +314,27 @@
 							Cancel
 						</Button>
 					{:else}
-						<Button variant="outline" size="sm" href="/storages/{storage.id}/label">Print label</Button>
-						<Button variant="ghost" size="sm" onclick={startRename}>Rename</Button>
+						<Button variant="ghost" size="sm" href="/storages/{storage.id}/label">
+							<Printer /> Print label
+						</Button>
+						<Button variant="ghost" size="sm" onclick={startRename}>
+							<Pencil /> Rename
+						</Button>
 					{/if}
-				</Card.Action>
+				</div>
 			</Card.Header>
-			<Card.Content class="mt-4 flex flex-col gap-2 p-0 text-sm">
+		</Card.Root>
+
+		<!-- Details card: Notes always, Location folded in as a root-only
+		     subsection below a divider — replaces the old separate Location
+		     Card.Root. Keeps this page to the same two-card core (identity,
+		     details) as the item detail page, rather than stacking identity +
+		     notes + location as three separate glass panels before the
+		     children/items lists even start. -->
+		<Card.Root variant="glass" class="p-4">
+			<div class="flex flex-col gap-2">
 				<div class="flex items-center justify-between">
-					<span class="text-muted-foreground font-medium">Notes</span>
+					<span class="text-muted-foreground text-xs font-medium tracking-wide uppercase">Notes</span>
 					{#if !editingNotes}
 						<Button variant="ghost" size="sm" onclick={startEditNotes}>Edit</Button>
 					{/if}
@@ -332,28 +361,30 @@
 						</Button>
 					</div>
 				{:else}
-					<p class="text-muted-foreground">{storage.notes || 'No notes yet.'}</p>
+					<p class="text-muted-foreground text-sm">{storage.notes || 'No notes yet.'}</p>
 				{/if}
-			</Card.Content>
-		</Card.Root>
+			</div>
 
-		{#if storage.parent_id === null}
-			<Card.Root variant="glass" class="p-4">
-				<Card.Content class="flex flex-col gap-2 p-0">
-					<span class="text-sm font-medium">Location</span>
+			{#if storage.parent_id === null}
+				<div class="border-border/50 mt-4 flex flex-col gap-2 border-t pt-4">
+					<span class="text-muted-foreground text-xs font-medium tracking-wide uppercase">Location</span>
 					<LocationSelect bind:locationId={selectedLocationId} onchange={handleLocationChange} />
 					{#if locationSaveError}<p class="text-destructive text-xs">{locationSaveError}</p>{/if}
-				</Card.Content>
-			</Card.Root>
-		{/if}
+				</div>
+			{/if}
+		</Card.Root>
 
 		{#if children.length > 0}
 			<div class="flex flex-col gap-2">
-				<h2 class="text-muted-foreground text-sm font-medium">Storage</h2>
+				<h2 class="text-muted-foreground text-xs font-medium tracking-wide uppercase">Storage</h2>
 				{#each children as c (c.id)}
 					<a href="/storages/{c.id}" class="block">
 						<Card.Root variant="glass" class="p-3">
-							<Card.Content class="p-0 text-sm">{c.name}</Card.Content>
+							<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
+								<Box class="text-muted-foreground size-4 shrink-0" />
+								<span class="min-w-0 flex-1 truncate">{c.name}</span>
+								<ChevronRight class="text-muted-foreground/60 size-4 shrink-0" />
+							</Card.Content>
 						</Card.Root>
 					</a>
 				{/each}
@@ -362,11 +393,15 @@
 
 		{#if items.length > 0}
 			<div class="flex flex-col gap-2">
-				<h2 class="text-muted-foreground text-sm font-medium">Items</h2>
+				<h2 class="text-muted-foreground text-xs font-medium tracking-wide uppercase">Items</h2>
 				{#each items as it (it.id)}
 					<a href="/items/{it.id}" class="block">
 						<Card.Root variant="glass" class="p-3">
-							<Card.Content class="p-0 text-sm">{it.name}</Card.Content>
+							<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
+								<Package class="text-muted-foreground size-4 shrink-0" />
+								<span class="min-w-0 flex-1 truncate">{it.name}</span>
+								<ChevronRight class="text-muted-foreground/60 size-4 shrink-0" />
+							</Card.Content>
 						</Card.Root>
 					</a>
 				{/each}
@@ -377,9 +412,14 @@
 			<p class="text-muted-foreground text-sm">Nothing here yet.</p>
 		{/if}
 
-		<div class="border-border/50 mt-2 flex flex-col items-start gap-2 border-t pt-4">
-			<Button variant="outline" href="/storages/{storage.id}/move">Move</Button>
-			<Button variant="destructive" onclick={handleDelete} disabled={deleting}>
+		<!-- Move is full-width (structural but reversible, benefits from a
+		     larger touch target); Delete stays intrinsic-width via self-start
+		     now that the container no longer stretches it — deliberate
+		     asymmetry, not a leftover: a full-width Delete would maximize the
+		     exact mis-click risk this footer already exists to avoid. -->
+		<div class="border-border/50 mt-2 flex flex-col gap-2 border-t pt-4">
+			<Button variant="outline" href="/storages/{storage.id}/move" class="w-full">Move</Button>
+			<Button variant="destructive" onclick={handleDelete} disabled={deleting} class="self-start">
 				{deleting ? 'Deleting…' : 'Delete'}
 			</Button>
 			{#if deleteError}<p class="text-destructive text-xs">{deleteError}</p>{/if}
