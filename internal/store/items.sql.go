@@ -34,6 +34,53 @@ func (q *Queries) DeleteItem(ctx context.Context, id int64) error {
 	return err
 }
 
+const findItemsByExactName = `-- name: FindItemsByExactName :many
+SELECT id, storage_id, owner_id, is_shared, name, description, quantity, condition, qr_token, photo_url, purchase_date, purchase_price, receipt_url, custom_fields, created_at, updated_at FROM items WHERE lower(name) = lower($1::text)
+`
+
+// Exact (case-insensitive) match, deliberately not fuzzy — used by
+// delete_item's strict resolver (internal/mcpserver), which must never act
+// on an approximate match the way resolveItem's fuzzy matching does for
+// every other tool. Item names aren't unique, so this can still return more
+// than one row — the caller refuses on that, same tie-handling shape as
+// resolveItem's fuzzy version.
+func (q *Queries) FindItemsByExactName(ctx context.Context, name string) ([]Item, error) {
+	rows, err := q.db.Query(ctx, findItemsByExactName, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Item
+	for rows.Next() {
+		var i Item
+		if err := rows.Scan(
+			&i.ID,
+			&i.StorageID,
+			&i.OwnerID,
+			&i.IsShared,
+			&i.Name,
+			&i.Description,
+			&i.Quantity,
+			&i.Condition,
+			&i.QrToken,
+			&i.PhotoUrl,
+			&i.PurchaseDate,
+			&i.PurchasePrice,
+			&i.ReceiptUrl,
+			&i.CustomFields,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getItemByID = `-- name: GetItemByID :one
 
 SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags

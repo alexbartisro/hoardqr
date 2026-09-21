@@ -30,6 +30,16 @@ RETURNING *;
 -- name: StorageExists :one
 SELECT EXISTS(SELECT 1 FROM storages WHERE id = $1);
 
+-- name: FindStoragesByExactName :many
+-- Exact (case-insensitive) match, deliberately not fuzzy — used by
+-- delete_storage's strict resolver (internal/mcpserver), which must never
+-- act on an approximate match the way resolveStorage's fuzzy matching does
+-- for every other tool. Storage names aren't unique (the same name can
+-- legitimately exist at different tree positions), so this can still
+-- return more than one row — the caller refuses on that, same tie-handling
+-- shape as resolveStorage's fuzzy version.
+SELECT * FROM storages WHERE lower(name) = lower(sqlc.arg('name')::text);
+
 -- name: StorageBreadcrumb :many
 -- Root-to-leaf path (architecture plan §3). The `visited` array + the
 -- `WHERE NOT (s.id = ANY(p.visited))` guard is deliberate cycle-detection

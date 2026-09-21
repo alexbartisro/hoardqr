@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -211,4 +212,133 @@ func breadcrumbText(ctx context.Context, q *store.Queries, storageID int64) (str
 		names = append(names, c.Name)
 	}
 	return strings.Join(names, " > "), nil
+}
+
+// resolveStorageStrict resolves a storage for delete_storage specifically —
+// either a numeric database id, or an exact (case-insensitive, non-fuzzy)
+// name match. Unlike resolveStorage's fuzzy matching (used by every
+// non-destructive tool), this never acts on an approximate match: deleting
+// the wrong storage isn't something a caller could notice from the result
+// the way a bad move_item would be. Storage names aren't unique, so an
+// exact-name match can still tie across two or more storages — refused the
+// same way resolveStorage refuses a fuzzy tie, just pointing the caller at
+// an id instead of "be more specific" (a name alone can't disambiguate two
+// identically-named storages the way it can for a fuzzy, scored match).
+func resolveStorageStrict(ctx context.Context, q *store.Queries, input string) (id int64, name string, err error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return 0, "", toolErrorf("storage is required")
+	}
+
+	// Both interpretations are checked unconditionally, not "numeric string
+	// means id, full stop" — a storage can legitimately be *named* a number
+	// (a numbered bin, a room number), and checking only the id
+	// interpretation would either miss that storage entirely (no id happens
+	// to match) or, worse, silently delete a same-numbered but unrelated
+	// row if one does. Candidates from both paths are deduped by id: a
+	// numeric input that happens to also be some *other* row's exact name
+	// is a real ambiguity, refused the same way two name-matches are.
+	seen := map[int64]bool{}
+	var candIDs []int64
+	var candNames []string
+	add := func(candID int64, candName string) {
+		if !seen[candID] {
+			seen[candID] = true
+			candIDs = append(candIDs, candID)
+			candNames = append(candNames, candName)
+		}
+	}
+
+	if parsedID, convErr := strconv.ParseInt(trimmed, 10, 64); convErr == nil {
+		s, err := q.GetStorageByID(ctx, parsedID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return 0, "", err
+		}
+		if err == nil {
+			add(s.ID, s.Name)
+		}
+	}
+	nameMatches, err := q.FindStoragesByExactName(ctx, trimmed)
+	if err != nil {
+		return 0, "", err
+	}
+	for _, m := range nameMatches {
+		add(m.ID, m.Name)
+	}
+
+	switch len(candIDs) {
+	case 0:
+		return 0, "", toolErrorf("no storage named %q or with that id found — delete requires an exact name match or an id (try find_items/list_contents to look one up)", trimmed)
+	case 1:
+		return candIDs[0], candNames[0], nil
+	default:
+		paths := make([]string, len(candIDs))
+		for i, candID := range candIDs {
+			path, err := breadcrumbText(ctx, q, candID)
+			if err != nil {
+				return 0, "", err
+			}
+			paths[i] = fmt.Sprintf("%s (id %d)", path, candID)
+		}
+		return 0, "", toolErrorf("%q matches more than one storage — use its id instead: %s", trimmed, strings.Join(paths, "; "))
+	}
+}
+
+// resolveItemStrict is resolveStorageStrict's item-side equivalent, used by
+// delete_item.
+func resolveItemStrict(ctx context.Context, q *store.Queries, input string) (id int64, name string, err error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return 0, "", toolErrorf("item is required")
+	}
+
+	// Same both-interpretations-checked, deduped-by-id approach as
+	// resolveStorageStrict — see its comment for why a numeric input can't
+	// just be assumed to mean "id" (an item can legitimately be named a
+	// number too).
+	seen := map[int64]bool{}
+	var candIDs, candStorageIDs []int64
+	var candNames []string
+	add := func(candID, storageID int64, candName string) {
+		if !seen[candID] {
+			seen[candID] = true
+			candIDs = append(candIDs, candID)
+			candStorageIDs = append(candStorageIDs, storageID)
+			candNames = append(candNames, candName)
+		}
+	}
+
+	if parsedID, convErr := strconv.ParseInt(trimmed, 10, 64); convErr == nil {
+		row, err := q.GetItemByID(ctx, parsedID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return 0, "", err
+		}
+		if err == nil {
+			add(row.ID, row.StorageID, row.Name)
+		}
+	}
+	nameMatches, err := q.FindItemsByExactName(ctx, trimmed)
+	if err != nil {
+		return 0, "", err
+	}
+	for _, m := range nameMatches {
+		add(m.ID, m.StorageID, m.Name)
+	}
+
+	switch len(candIDs) {
+	case 0:
+		return 0, "", toolErrorf("no item named %q or with that id found — delete requires an exact name match or an id (try find_items/where_is to look one up)", trimmed)
+	case 1:
+		return candIDs[0], candNames[0], nil
+	default:
+		descriptions := make([]string, len(candIDs))
+		for i := range candIDs {
+			path, err := breadcrumbText(ctx, q, candStorageIDs[i])
+			if err != nil {
+				return 0, "", err
+			}
+			descriptions[i] = fmt.Sprintf("%s in %s (id %d)", candNames[i], path, candIDs[i])
+		}
+		return 0, "", toolErrorf("%q matches more than one item — use its id instead: %s", trimmed, strings.Join(descriptions, "; "))
+	}
 }

@@ -48,7 +48,7 @@ func registerTools(s *mcp.Server, pool *pgxpool.Pool) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "delete_item",
-		Description: "Permanently delete an object.",
+		Description: "Permanently delete an object. Requires an exact name match or a numeric id, not a fuzzy match — resolve it first (e.g. find_items) if unsure.",
 	}, deleteItemHandler(q))
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -73,7 +73,7 @@ func registerTools(s *mcp.Server, pool *pgxpool.Pool) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "delete_storage",
-		Description: "Permanently delete a storage. Child storages are promoted to root level automatically. Refuses if the storage directly holds objects — move them elsewhere first (see move_item); a storage delete never deletes the objects inside it.",
+		Description: "Permanently delete a storage. Requires an exact name match or a numeric id, not a fuzzy match — resolve it first (e.g. list_contents) if unsure. Child storages are promoted to root level automatically. Refuses if the storage directly holds objects — move them elsewhere first (see move_item); a storage delete never deletes the objects inside it.",
 	}, deleteStorageHandler(pool))
 
 	mcp.AddTool(s, &mcp.Tool{

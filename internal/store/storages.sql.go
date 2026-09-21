@@ -100,6 +100,48 @@ func (q *Queries) DirectChildStorageIDs(ctx context.Context, parentID *int64) ([
 	return items, nil
 }
 
+const findStoragesByExactName = `-- name: FindStoragesByExactName :many
+SELECT id, parent_id, owner_id, is_shared, name, qr_token, photo_url, notes, created_at, location_id FROM storages WHERE lower(name) = lower($1::text)
+`
+
+// Exact (case-insensitive) match, deliberately not fuzzy — used by
+// delete_storage's strict resolver (internal/mcpserver), which must never
+// act on an approximate match the way resolveStorage's fuzzy matching does
+// for every other tool. Storage names aren't unique (the same name can
+// legitimately exist at different tree positions), so this can still
+// return more than one row — the caller refuses on that, same tie-handling
+// shape as resolveStorage's fuzzy version.
+func (q *Queries) FindStoragesByExactName(ctx context.Context, name string) ([]Storage, error) {
+	rows, err := q.db.Query(ctx, findStoragesByExactName, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Storage
+	for rows.Next() {
+		var i Storage
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentID,
+			&i.OwnerID,
+			&i.IsShared,
+			&i.Name,
+			&i.QrToken,
+			&i.PhotoUrl,
+			&i.Notes,
+			&i.CreatedAt,
+			&i.LocationID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getStorageByID = `-- name: GetStorageByID :one
 SELECT id, parent_id, owner_id, is_shared, name, qr_token, photo_url, notes, created_at, location_id FROM storages WHERE id = $1
 `

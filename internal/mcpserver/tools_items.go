@@ -125,7 +125,7 @@ func editItemHandler(q *store.Queries) mcp.ToolHandlerFor[editItemInput, editIte
 // --- delete_item ---
 
 type deleteItemInput struct {
-	Item string `json:"item" jsonschema:"the item to delete, by name or close to it"`
+	Item string `json:"item" jsonschema:"the item to delete — its exact name or its numeric id (see find_items/where_is). Fuzzy matching is deliberately not used here, unlike every other tool: a delete must never act on an approximate match."`
 }
 
 type deleteItemOutput struct {
@@ -133,10 +133,13 @@ type deleteItemOutput struct {
 }
 
 // deleteItemHandler has no cascade or force concern the way delete_storage
-// does — an item has nothing nested inside it to protect.
+// does — an item has nothing nested inside it to protect. Still resolves
+// via resolveItemStrict, not the fuzzy resolveItem every other tool uses
+// (added 2026-09-20, user request) — same reasoning as delete_storage: a
+// delete must never act on an approximate match.
 func deleteItemHandler(q *store.Queries) mcp.ToolHandlerFor[deleteItemInput, deleteItemOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in deleteItemInput) (*mcp.CallToolResult, deleteItemOutput, error) {
-		itemID, matchedName, _, err := resolveItem(ctx, q, in.Item)
+		itemID, matchedName, err := resolveItemStrict(ctx, q, in.Item)
 		if err != nil {
 			return nil, deleteItemOutput{}, sanitizeToolError(ctx, "delete_item", err)
 		}

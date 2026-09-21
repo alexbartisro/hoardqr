@@ -97,6 +97,15 @@ WHERE id = sqlc.arg(id)::bigint;
 -- name: ItemExists :one
 SELECT EXISTS(SELECT 1 FROM items WHERE id = $1);
 
+-- name: FindItemsByExactName :many
+-- Exact (case-insensitive) match, deliberately not fuzzy — used by
+-- delete_item's strict resolver (internal/mcpserver), which must never act
+-- on an approximate match the way resolveItem's fuzzy matching does for
+-- every other tool. Item names aren't unique, so this can still return more
+-- than one row — the caller refuses on that, same tie-handling shape as
+-- resolveItem's fuzzy version.
+SELECT * FROM items WHERE lower(name) = lower(sqlc.arg('name')::text);
+
 -- name: UpdateItemFields :one
 -- MCP's edit_item tool. Storage moves go through move_item (its own audit
 -- trail), and tags through add_item_tag/remove_item_tag (additive, so a

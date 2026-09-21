@@ -1966,3 +1966,249 @@ func TestMCPToolsEditLocationRejectsCaseVariantDuplicate(t *testing.T) {
 		t.Fatalf("expected a duplicate-name error when renaming onto an existing name, got success: %s", textOf(t, res))
 	}
 }
+
+// ==================== Strict delete resolution ====================
+
+// TestMCPToolsDeleteItemRejectsFuzzyMatch proves delete_item requires an
+// exact name or an id, unlike every other tool's fuzzy resolveItem — a
+// partial/fuzzy query that would resolve fine for find_items/where_is must
+// not resolve at all here.
+func TestMCPToolsDeleteItemRejectsFuzzyMatch(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Strict Delete Storage"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Strict Delete Cordless Drill", "storage": "MCP Test Strict Delete Storage",
+	}, &item)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
+
+	// A fuzzy substring ("drill") that find_items/where_is would happily
+	// resolve must be refused outright here, not silently matched.
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "delete_item", Arguments: map[string]any{"item": "drill"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected delete_item to reject a fuzzy/partial name, got success: %s", textOf(t, res))
+	}
+
+	exists, err := q.ItemExists(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("ItemExists: %v", err)
+	}
+	if !exists {
+		t.Fatal("item must survive a rejected fuzzy delete_item call")
+	}
+
+	// The exact name (case-insensitive) must still work.
+	var out deleteItemOutput
+	callTool(t, cs, "delete_item", map[string]any{"item": "mcp test strict delete cordless drill"}, &out)
+	if out.Deleted != "MCP Test Strict Delete Cordless Drill" {
+		t.Fatalf("unexpected delete_item result: %+v", out)
+	}
+}
+
+// TestMCPToolsDeleteItemAcceptsID proves a numeric id resolves directly,
+// bypassing name matching entirely.
+func TestMCPToolsDeleteItemAcceptsID(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Delete By ID Storage"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+	var item addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Delete By ID Widget", "storage": "MCP Test Delete By ID Storage",
+	}, &item)
+
+	var out deleteItemOutput
+	callTool(t, cs, "delete_item", map[string]any{"item": fmt.Sprintf("%d", item.ID)}, &out)
+	if out.Deleted != "MCP Test Delete By ID Widget" {
+		t.Fatalf("unexpected delete_item result: %+v", out)
+	}
+}
+
+// TestMCPToolsDeleteItemAmbiguousExactNameRequiresID proves that when two
+// items share the exact same name, delete_item refuses rather than picking
+// one, and names each candidate's id so the caller can retry unambiguously.
+func TestMCPToolsDeleteItemAmbiguousExactNameRequiresID(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	var storageA, storageB addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Dup Item Storage A"}, &storageA)
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Dup Item Storage B"}, &storageB)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	var itemA, itemB addItemOutput
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Dup Item Cable", "storage": "MCP Test Dup Item Storage A",
+	}, &itemA)
+	callTool(t, cs, "add_item", map[string]any{
+		"name": "MCP Test Dup Item Cable", "storage": "MCP Test Dup Item Storage B",
+	}, &itemB)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "delete_item", Arguments: map[string]any{"item": "MCP Test Dup Item Cable"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected refusal on an exact-name tie, got success: %s", textOf(t, res))
+	}
+	text := textOf(t, res)
+	if !strings.Contains(text, fmt.Sprintf("id %d", itemA.ID)) || !strings.Contains(text, fmt.Sprintf("id %d", itemB.ID)) {
+		t.Fatalf("expected both candidates' ids in the refusal, got %q", text)
+	}
+
+	// Disambiguating by id must then succeed.
+	var out deleteItemOutput
+	callTool(t, cs, "delete_item", map[string]any{"item": fmt.Sprintf("%d", itemA.ID)}, &out)
+	aExists, err := q.ItemExists(ctx, itemA.ID)
+	if err != nil {
+		t.Fatalf("ItemExists: %v", err)
+	}
+	if aExists {
+		t.Fatal("expected item A to be deleted by id")
+	}
+	bExists, err := q.ItemExists(ctx, itemB.ID)
+	if err != nil {
+		t.Fatalf("ItemExists: %v", err)
+	}
+	if !bExists {
+		t.Fatal("item B must survive — only item A's id was targeted")
+	}
+}
+
+// TestMCPToolsDeleteStorageRejectsFuzzyMatchAndAcceptsID mirrors the item
+// tests above for delete_storage.
+func TestMCPToolsDeleteStorageRejectsFuzzyMatchAndAcceptsID(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Strict Delete Garage Shelf"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "delete_storage", Arguments: map[string]any{"storage": "shelf"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected delete_storage to reject a fuzzy/partial name, got success: %s", textOf(t, res))
+	}
+	exists, err := q.StorageExists(ctx, storage.ID)
+	if err != nil {
+		t.Fatalf("StorageExists: %v", err)
+	}
+	if !exists {
+		t.Fatal("storage must survive a rejected fuzzy delete_storage call")
+	}
+
+	var out deleteStorageOutput
+	callTool(t, cs, "delete_storage", map[string]any{"storage": fmt.Sprintf("%d", storage.ID)}, &out)
+	if out.Deleted != "MCP Test Strict Delete Garage Shelf" {
+		t.Fatalf("unexpected delete_storage result: %+v", out)
+	}
+}
+
+// TestMCPToolsDeleteStorageFindsNumericallyNamedStorage proves the strict
+// resolver checks the exact-name interpretation even when the input parses
+// as an integer — a storage literally named "12345" (a bin/room number,
+// plausible for a home inventory) must still be found by that name, not
+// misread as "the storage with id 12345" and fail to resolve just because
+// no such id happens to exist.
+func TestMCPToolsDeleteStorageFindsNumericallyNamedStorage(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+
+	// The literal name has no "MCP Test" prefix on purpose (it must be a
+	// bare number to exercise the parses-as-an-integer path) — cleaned up
+	// explicitly rather than relying on the naming-convention sweep.
+	var storage addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "9581372"}, &storage)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, storage.ID) })
+
+	var out deleteStorageOutput
+	callTool(t, cs, "delete_storage", map[string]any{"storage": "9581372"}, &out)
+	if out.Deleted != "9581372" {
+		t.Fatalf("unexpected delete_storage result: %+v", out)
+	}
+}
+
+// TestMCPToolsDeleteStorageRefusesIDNameCollision proves the genuinely
+// dangerous case advisor review flagged: a numeric input that matches one
+// row's real id AND a *different* row's exact name must refuse rather than
+// silently picking the id interpretation (which would have been this
+// resolver's original, buggy behavior).
+func TestMCPToolsDeleteStorageRefusesIDNameCollision(t *testing.T) {
+	pool := testPool(t)
+	requireNoLeftoverTestRows(t, pool)
+	cs := testClient(t, pool)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	var byIDTarget addStorageOutput
+	callTool(t, cs, "add_storage", map[string]any{"name": "MCP Test Collision ByID"}, &byIDTarget)
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE name LIKE 'MCP Test %'`) })
+
+	// Name the second storage exactly the first one's numeric id — the
+	// collision this test exists to catch.
+	collidingName := fmt.Sprintf("%d", byIDTarget.ID)
+	byName, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: collidingName, QrToken: "COLLISION-" + collidingName, IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, byName.ID) })
+
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name: "delete_storage", Arguments: map[string]any{"storage": collidingName},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: unexpected protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected refusal on an id/name collision, got success: %s", textOf(t, res))
+	}
+	text := textOf(t, res)
+	if !strings.Contains(text, fmt.Sprintf("id %d", byIDTarget.ID)) || !strings.Contains(text, fmt.Sprintf("id %d", byName.ID)) {
+		t.Fatalf("expected both colliding candidates' ids in the refusal, got %q", text)
+	}
+
+	// Neither must have been deleted.
+	for _, sid := range []int64{byIDTarget.ID, byName.ID} {
+		exists, err := q.StorageExists(ctx, sid)
+		if err != nil {
+			t.Fatalf("StorageExists: %v", err)
+		}
+		if !exists {
+			t.Fatalf("storage %d must survive a refused collision delete", sid)
+		}
+	}
+}

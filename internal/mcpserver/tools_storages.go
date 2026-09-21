@@ -138,7 +138,7 @@ func moveStorageHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[moveStorageInput,
 // --- delete_storage ---
 
 type deleteStorageInput struct {
-	Storage string `json:"storage" jsonschema:"the storage to delete, by name or close to it"`
+	Storage string `json:"storage" jsonschema:"the storage to delete — its exact name or its numeric id (see find_items/list_contents). Fuzzy matching is deliberately not used here, unlike every other tool: a delete must never act on an approximate match."`
 }
 
 type deleteStorageOutput struct {
@@ -153,10 +153,16 @@ type deleteStorageOutput struct {
 // move_item them elsewhere first. Non-root storages keep auto-promoting
 // their direct items to the parent, same as REST — that's not a deletion,
 // nothing is destroyed.
+//
+// Resolves via resolveStorageStrict, not the fuzzy resolveStorage every
+// other tool uses (added 2026-09-20, user request) — a delete is the one
+// operation where acting on the wrong storage isn't recoverable, so this
+// requires an exact name match or a numeric id rather than "closest fuzzy
+// match wins."
 func deleteStorageHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[deleteStorageInput, deleteStorageOutput] {
 	q := store.New(pool)
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in deleteStorageInput) (*mcp.CallToolResult, deleteStorageOutput, error) {
-		storageID, matchedName, err := resolveStorage(ctx, q, in.Storage)
+		storageID, matchedName, err := resolveStorageStrict(ctx, q, in.Storage)
 		if err != nil {
 			return nil, deleteStorageOutput{}, sanitizeToolError(ctx, "delete_storage", err)
 		}
