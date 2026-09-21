@@ -4,22 +4,15 @@
 	// Everything else is optional at creation, editable later.
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { createItem, createTag, getStorage, getTags } from '$lib/api';
-	import type { Tag } from '$lib/types';
+	import { createItem, getStorage } from '$lib/api';
 	import StoragePicker from '$lib/components/storage-picker.svelte';
 	import PhotoUpload from '$lib/components/photo-upload.svelte';
+	import TagInput from '$lib/components/tag-input.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Card from '$lib/components/ui/card';
 	import { cn } from '$lib/utils';
-
-	// Item.condition (types.ts) is plain `string | null` — no DB-level enum
-	// (architecture plan §3's `condition TEXT` column has none either) — so
-	// this is a frontend-only convenience list, not a constraint the backend
-	// will enforce. Free text was tried first and swapped for this per
-	// feedback 2026-09-17: a handful of consistent values beats everyone
-	// typing their own wording for the same thing.
-	const CONDITIONS = ['new', 'good', 'fair', 'poor'];
+	import { CONDITIONS } from '$lib/constants';
 
 	// Arrives from /scan's "no match — create here" outcome (§6): the scanned
 	// code becomes this item's qr_token instead of generating a new one. Captured
@@ -60,8 +53,6 @@
 		purchasePrice: string;
 		photoUrl: string | null;
 		tags: Set<string>;
-		tagQuery: string;
-		tagOpen: boolean;
 	};
 
 	let draftSeq = 0;
@@ -75,9 +66,7 @@
 			purchaseDate: '',
 			purchasePrice: '',
 			photoUrl: null,
-			tags: new Set(),
-			tagQuery: '',
-			tagOpen: false
+			tags: new Set()
 		};
 	}
 
@@ -92,78 +81,8 @@
 	const firstDraft = makeDraft();
 	const scannedDraftId = firstDraft.id;
 	let drafts = $state<Draft[]>([firstDraft]);
-	let allTags = $state<Tag[]>([]);
 	let submitting = $state(false);
 	let error = $state<string | null>(null);
-
-	// Static list, fetched once — a plain call, not an $effect (nothing here is
-	// reactive, so there's nothing to guard against re-running).
-	getTags().then((t) => (allTags = t));
-
-	function toggleTag(draft: Draft, tagName: string) {
-		const next = new Set(draft.tags);
-		if (next.has(tagName)) next.delete(tagName);
-		else next.add(tagName);
-		draft.tags = next;
-	}
-
-	// Empty query still returns a slice of allTags (not []) so focusing the
-	// field shows what already exists — the point of adding a text field was
-	// to add search on top of browsing, not to replace browsing with it.
-	function tagSuggestions(draft: Draft): Tag[] {
-		const q = draft.tagQuery.trim().toLowerCase();
-		return allTags
-			.filter((t) => !draft.tags.has(t.name) && t.name.toLowerCase().includes(q))
-			.slice(0, 6);
-	}
-
-	function hasExactTagMatch(draft: Draft): boolean {
-		const q = draft.tagQuery.trim().toLowerCase();
-		return allTags.some((t) => t.name.toLowerCase() === q);
-	}
-
-	function selectTag(draft: Draft, tag: Tag) {
-		const next = new Set(draft.tags);
-		next.add(tag.name);
-		draft.tags = next;
-		draft.tagQuery = '';
-	}
-
-	// Typing a brand-new name and confirming it (Enter, or the "Create" option)
-	// persists it via createTag rather than just attaching a bare string to this
-	// item — otherwise the tag wouldn't exist for autocomplete on the next draft
-	// or the next visit to this page.
-	async function confirmTag(draft: Draft) {
-		const trimmed = draft.tagQuery.trim();
-		if (!trimmed) return;
-		const existing = allTags.find((t) => t.name.toLowerCase() === trimmed.toLowerCase());
-		if (existing) {
-			selectTag(draft, existing);
-			return;
-		}
-		const created = await createTag(trimmed);
-		allTags = [...allTags, created];
-		selectTag(draft, created);
-	}
-
-	function handleTagKeydown(e: KeyboardEvent, draft: Draft) {
-		if (e.key === 'Enter') {
-			e.preventDefault();
-			confirmTag(draft);
-		} else if (e.key === 'Escape') {
-			draft.tagOpen = false;
-		}
-	}
-
-	// Same reasoning as search-bar.svelte's handleFocusOut (see CLAUDE.md): a
-	// plain onblur would close this before a click on a suggestion button
-	// registers, breaking keyboard use entirely. Only close when focus leaves
-	// the input+dropdown container, not when it moves within it.
-	function handleTagFocusOut(e: FocusEvent, draft: Draft) {
-		if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) {
-			draft.tagOpen = false;
-		}
-	}
 
 	function addMore() {
 		drafts.push(makeDraft());
@@ -339,57 +258,7 @@
 
 						<div class="flex flex-col gap-1.5">
 							<label for={`tag-${draft.id}`} class="text-sm font-medium">Tags</label>
-							{#if draft.tags.size > 0}
-								<div class="flex flex-wrap gap-2">
-									{#each [...draft.tags] as tagName (tagName)}
-										<button
-											type="button"
-											class="bg-primary text-primary-foreground flex items-center gap-1 rounded-full px-3 py-1 text-sm"
-											onclick={() => toggleTag(draft, tagName)}
-										>
-											{tagName}
-											<span aria-hidden="true">×</span>
-										</button>
-									{/each}
-								</div>
-							{/if}
-							<div class="relative" onfocusout={(e) => handleTagFocusOut(e, draft)}>
-								<Input
-									id={`tag-${draft.id}`}
-									placeholder="Type to find or create a tag…"
-									bind:value={draft.tagQuery}
-									onfocus={() => (draft.tagOpen = true)}
-									onkeydown={(e) => handleTagKeydown(e, draft)}
-								/>
-								{#if draft.tagOpen}
-									<div class="glass-panel absolute top-full left-0 z-20 mt-1 w-full rounded-md p-1">
-										<ul class="flex flex-col gap-0.5">
-											{#each tagSuggestions(draft) as t (t.id)}
-												<li>
-													<button
-														type="button"
-														class="hover:bg-accent w-full rounded-md px-2 py-1.5 text-left text-sm"
-														onclick={() => selectTag(draft, t)}
-													>
-														{t.name}
-													</button>
-												</li>
-											{/each}
-											{#if draft.tagQuery.trim() && !hasExactTagMatch(draft)}
-												<li>
-													<button
-														type="button"
-														class="hover:bg-accent w-full rounded-md px-2 py-1.5 text-left text-sm"
-														onclick={() => confirmTag(draft)}
-													>
-														+ Create "{draft.tagQuery.trim()}"
-													</button>
-												</li>
-											{/if}
-										</ul>
-									</div>
-								{/if}
-							</div>
+							<TagInput id={`tag-${draft.id}`} bind:tags={draft.tags} />
 						</div>
 					</div>
 				{/each}

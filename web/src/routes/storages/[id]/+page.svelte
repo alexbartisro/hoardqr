@@ -31,6 +31,15 @@
 	let deleting = $state(false);
 	let deleteError = $state<string | null>(null);
 
+	// Notes editor — draft-copy-then-Save/Cancel, same pattern as the item
+	// detail page's Details editor: freeform text shouldn't autosave per
+	// keystroke or per blur the way Photo/Location's immediate-onchange
+	// controls do.
+	let editingNotes = $state(false);
+	let draftNotes = $state('');
+	let notesError = $state<string | null>(null);
+	let savingNotes = $state(false);
+
 	// See items/[id]'s loadSeq comment — same stale-response guard.
 	let loadSeq = 0;
 	$effect(() => {
@@ -46,6 +55,9 @@
 		savingRename = false;
 		deleting = false;
 		deleteError = null;
+		editingNotes = false;
+		notesError = null;
+		savingNotes = false;
 		Promise.all([getStorage(id), getStorages(id), getItems({ storage_id: id })])
 			.then(([s, childStorages, storageItems]) => {
 				if (seq !== loadSeq) return;
@@ -185,6 +197,32 @@
 		}
 	}
 
+	function startEditNotes() {
+		if (!storage) return;
+		draftNotes = storage.notes ?? '';
+		notesError = null;
+		editingNotes = true;
+	}
+
+	async function saveNotes() {
+		if (!storage) return;
+		const id = storage.id;
+		const seq = loadSeq;
+		savingNotes = true;
+		notesError = null;
+		try {
+			const updated = await updateStorage(id, { notes: draftNotes.trim() || null });
+			if (seq !== loadSeq) return;
+			storage = updated;
+			editingNotes = false;
+		} catch (e) {
+			if (seq !== loadSeq) return;
+			notesError = e instanceof Error ? e.message : 'Failed to save notes.';
+		} finally {
+			if (seq === loadSeq) savingNotes = false;
+		}
+	}
+
 	// See items/[id]'s handlePhotoChange — same reasoning: PhotoUpload already
 	// persisted the file itself, this just saves the resulting URL.
 	async function handlePhotoChange(photoUrl: string | null) {
@@ -265,6 +303,38 @@
 					{/if}
 				</Card.Action>
 			</Card.Header>
+			<Card.Content class="mt-4 flex flex-col gap-2 p-0 text-sm">
+				<div class="flex items-center justify-between">
+					<span class="text-muted-foreground font-medium">Notes</span>
+					{#if !editingNotes}
+						<Button variant="ghost" size="sm" onclick={startEditNotes}>Edit</Button>
+					{/if}
+				</div>
+				{#if editingNotes}
+					<textarea
+						bind:value={draftNotes}
+						disabled={savingNotes}
+						rows="3"
+						class="border-input focus-visible:border-ring focus-visible:ring-ring/50 rounded-md border bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:ring-3"
+					></textarea>
+					{#if notesError}<p class="text-destructive text-xs">{notesError}</p>{/if}
+					<div class="flex gap-2">
+						<Button size="sm" onclick={saveNotes} disabled={savingNotes}>
+							{savingNotes ? 'Saving…' : 'Save'}
+						</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={() => (editingNotes = false)}
+							disabled={savingNotes}
+						>
+							Cancel
+						</Button>
+					</div>
+				{:else}
+					<p class="text-muted-foreground">{storage.notes || 'No notes yet.'}</p>
+				{/if}
+			</Card.Content>
 		</Card.Root>
 
 		{#if storage.parent_id === null}
@@ -307,7 +377,8 @@
 			<p class="text-muted-foreground text-sm">Nothing here yet.</p>
 		{/if}
 
-		<div class="border-border/50 mt-2 flex flex-col items-start gap-1 border-t pt-4">
+		<div class="border-border/50 mt-2 flex flex-col items-start gap-2 border-t pt-4">
+			<Button variant="outline" href="/storages/{storage.id}/move">Move</Button>
 			<Button variant="destructive" onclick={handleDelete} disabled={deleting}>
 				{deleting ? 'Deleting…' : 'Delete'}
 			</Button>

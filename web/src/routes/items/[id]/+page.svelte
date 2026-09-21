@@ -7,6 +7,8 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Card from '$lib/components/ui/card';
 	import PhotoUpload from '$lib/components/photo-upload.svelte';
+	import TagInput from '$lib/components/tag-input.svelte';
+	import { CONDITIONS } from '$lib/constants';
 
 	let item = $state<Item | null>(null);
 	let breadcrumb = $state<Breadcrumb>([]);
@@ -19,6 +21,24 @@
 	let renameError = $state<string | null>(null);
 	let savingRename = $state(false);
 	let renameInput = $state<HTMLInputElement | null>(null);
+
+	// Details editor (description, quantity, condition, purchase date/price,
+	// receipt, tags) — draft copies, not bound straight to `item`, so Cancel
+	// can revert without ever having written anything (see PhotoUpload's
+	// bind:photoUrl={item.photo_url} above for the contrasting
+	// immediate-save case, which has no Cancel because there's nothing to
+	// revert). Raw input strings for date/price, same convention as
+	// items/new's Draft — parsed to null/number only at save time.
+	let editingDetails = $state(false);
+	let draftDescription = $state('');
+	let draftQuantity = $state(1);
+	let draftCondition = $state('');
+	let draftPurchaseDate = $state('');
+	let draftPurchasePrice = $state('');
+	let draftReceiptUrl = $state('');
+	let draftTags = $state<Set<string>>(new Set());
+	let detailsError = $state<string | null>(null);
+	let savingDetails = $state(false);
 
 	// Set by /scan when this page is the result of scanning the item's own code
 	// (feedback 2026-09-17): scanning a physical object is someone asking "where
@@ -45,6 +65,9 @@
 		renameError = null;
 		savingRename = false;
 		deleting = false;
+		editingDetails = false;
+		detailsError = null;
+		savingDetails = false;
 		getItemById(id)
 			.then((r) => {
 				if (seq !== loadSeq) return;
@@ -107,6 +130,55 @@
 			await updateItem(item.id, { photo_url: photoUrl });
 		} catch (e) {
 			photoSaveError = e instanceof Error ? e.message : 'Failed to save photo.';
+		}
+	}
+
+	function startEditDetails() {
+		if (!item) return;
+		draftDescription = item.description ?? '';
+		draftQuantity = item.quantity;
+		draftCondition = item.condition ?? '';
+		draftPurchaseDate = item.purchase_date ?? '';
+		draftPurchasePrice = item.purchase_price != null ? String(item.purchase_price) : '';
+		draftReceiptUrl = item.receipt_url ?? '';
+		draftTags = new Set(item.tags);
+		detailsError = null;
+		editingDetails = true;
+	}
+
+	// Same parsing convention as items/new's submit() — empty strings become
+	// null, purchase_price parses to a number only when non-empty and valid
+	// — so behavior doesn't diverge between create and edit.
+	async function saveDetails() {
+		if (!item) return;
+		// Capture before the await: if the user navigates to a different item
+		// while this save is in flight, `item`'s own id no longer belongs to
+		// the page now showing — same loadSeq guard reasoning as
+		// storages/[id]'s handleLocationChange.
+		const id = item.id;
+		const seq = loadSeq;
+		savingDetails = true;
+		detailsError = null;
+		try {
+			const priceInput = draftPurchasePrice.trim();
+			const parsedPrice = Number(priceInput);
+			const updated = await updateItem(id, {
+				description: draftDescription.trim() || null,
+				quantity: Number(draftQuantity) || 1,
+				condition: draftCondition.trim() || null,
+				purchase_date: draftPurchaseDate || null,
+				purchase_price: priceInput && !Number.isNaN(parsedPrice) ? parsedPrice : null,
+				receipt_url: draftReceiptUrl.trim() || null,
+				tags: [...draftTags]
+			});
+			if (seq !== loadSeq) return;
+			item = updated;
+			editingDetails = false;
+		} catch (e) {
+			if (seq !== loadSeq) return;
+			detailsError = e instanceof Error ? e.message : 'Failed to save details.';
+		} finally {
+			if (seq === loadSeq) savingDetails = false;
 		}
 	}
 
@@ -186,7 +258,6 @@
 						{:else}
 							<h1 class="text-xl font-semibold break-words">{item.name}</h1>
 						{/if}
-						{#if item.description}<p class="text-muted-foreground text-sm">{item.description}</p>{/if}
 						{#if photoSaveError}<p class="text-destructive text-xs">{photoSaveError}</p>{/if}
 					</div>
 				</div>
@@ -204,42 +275,154 @@
 					{/if}
 				</Card.Action>
 			</Card.Header>
-			<Card.Content class="mt-4 flex flex-col gap-2 p-0 text-sm">
-				<div class="flex justify-between">
-					<span class="text-muted-foreground">Quantity</span><span>{item.quantity}</span>
-				</div>
-				{#if item.condition}
+			<div class="mt-4 flex items-center justify-between">
+				<span class="text-muted-foreground text-sm font-medium">Details</span>
+				{#if !editingDetails}
+					<Button variant="ghost" size="sm" onclick={startEditDetails}>Edit</Button>
+				{/if}
+			</div>
+			{#if editingDetails}
+				<Card.Content class="mt-2 flex flex-col gap-4 p-0 text-sm">
+					<div class="flex flex-col gap-1.5">
+						<label for="description" class="text-sm font-medium">Description</label>
+						<textarea
+							id="description"
+							bind:value={draftDescription}
+							disabled={savingDetails}
+							rows="3"
+							class="border-input focus-visible:border-ring focus-visible:ring-ring/50 rounded-md border bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:ring-3"
+						></textarea>
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<label for="quantity" class="text-sm font-medium">Quantity</label>
+						<Input
+							id="quantity"
+							type="number"
+							min="1"
+							bind:value={draftQuantity}
+							disabled={savingDetails}
+							class="w-24"
+						/>
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<label for="condition" class="text-sm font-medium">Condition</label>
+						<select
+							id="condition"
+							bind:value={draftCondition}
+							disabled={savingDetails}
+							class="border-input focus-visible:border-ring focus-visible:ring-ring/50 h-9 rounded-md border bg-transparent px-2.5 text-sm outline-none focus-visible:ring-3"
+						>
+							<option value="">Not set</option>
+							{#each CONDITIONS as c (c)}
+								<option value={c}>{c[0].toUpperCase() + c.slice(1)}</option>
+							{/each}
+						</select>
+					</div>
+					<div class="flex gap-4">
+						<div class="flex flex-1 flex-col gap-1.5">
+							<label for="purchase-date" class="text-sm font-medium">Purchased</label>
+							<Input
+								id="purchase-date"
+								type="date"
+								bind:value={draftPurchaseDate}
+								disabled={savingDetails}
+							/>
+						</div>
+						<div class="flex flex-1 flex-col gap-1.5">
+							<label for="purchase-price" class="text-sm font-medium">Price</label>
+							<Input
+								id="purchase-price"
+								type="text"
+								inputmode="decimal"
+								bind:value={draftPurchasePrice}
+								disabled={savingDetails}
+								placeholder="0.00"
+							/>
+						</div>
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<label for="receipt-url" class="text-sm font-medium">Receipt URL</label>
+						<Input
+							id="receipt-url"
+							type="url"
+							bind:value={draftReceiptUrl}
+							disabled={savingDetails}
+							placeholder="https://…"
+						/>
+					</div>
+					<div class="flex flex-col gap-1.5">
+						<span class="text-sm font-medium">Tags</span>
+						<TagInput id="tags" bind:tags={draftTags} />
+					</div>
+
+					{#if detailsError}<p class="text-destructive text-xs">{detailsError}</p>{/if}
+					<div class="flex gap-2">
+						<Button size="sm" onclick={saveDetails} disabled={savingDetails}>
+							{savingDetails ? 'Saving…' : 'Save'}
+						</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={() => (editingDetails = false)}
+							disabled={savingDetails}
+						>
+							Cancel
+						</Button>
+					</div>
+				</Card.Content>
+			{:else}
+				<Card.Content class="mt-2 flex flex-col gap-2 p-0 text-sm">
+					{#if item.description}<p class="text-muted-foreground mb-1">{item.description}</p>{/if}
 					<div class="flex justify-between">
-						<span class="text-muted-foreground">Condition</span><span>{item.condition}</span>
+						<span class="text-muted-foreground">Quantity</span><span>{item.quantity}</span>
+					</div>
+					{#if item.condition}
+						<div class="flex justify-between">
+							<span class="text-muted-foreground">Condition</span><span>{item.condition}</span>
+						</div>
+					{/if}
+					<div class="flex justify-between">
+						<span class="text-muted-foreground">Code</span><span class="font-mono">{item.qr_token}</span>
+					</div>
+					{#if item.purchase_date}
+						<div class="flex justify-between">
+							<span class="text-muted-foreground">Purchased</span><span>{item.purchase_date}</span>
+						</div>
+					{/if}
+					{#if item.purchase_price != null}
+						<div class="flex justify-between">
+							<span class="text-muted-foreground">Price</span><span>{item.purchase_price}</span>
+						</div>
+					{/if}
+					{#if item.receipt_url}
+						<div class="flex justify-between">
+							<span class="text-muted-foreground">Receipt</span>
+							<a
+								href={item.receipt_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="text-primary hover:underline"
+							>
+								View receipt →
+							</a>
+						</div>
+					{/if}
+					{#if !item.is_shared}
+						<p class="text-muted-foreground">Private — not shared</p>
+					{/if}
+				</Card.Content>
+				{#if item.tags.length > 0}
+					<div class="mt-4 flex flex-wrap gap-2">
+						{#each item.tags as t (t)}
+							<span class="bg-secondary text-secondary-foreground rounded-full px-3 py-1 text-xs">{t}</span>
+						{/each}
 					</div>
 				{/if}
-				<div class="flex justify-between">
-					<span class="text-muted-foreground">Code</span><span class="font-mono">{item.qr_token}</span>
-				</div>
-				{#if item.purchase_date}
-					<div class="flex justify-between">
-						<span class="text-muted-foreground">Purchased</span><span>{item.purchase_date}</span>
-					</div>
-				{/if}
-				{#if item.purchase_price != null}
-					<div class="flex justify-between">
-						<span class="text-muted-foreground">Price</span><span>{item.purchase_price}</span>
-					</div>
-				{/if}
-				{#if !item.is_shared}
-					<p class="text-muted-foreground">Private — not shared</p>
-				{/if}
-			</Card.Content>
-			{#if item.tags.length > 0}
-				<div class="mt-4 flex flex-wrap gap-2">
-					{#each item.tags as t (t)}
-						<span class="bg-secondary text-secondary-foreground rounded-full px-3 py-1 text-xs">{t}</span>
-					{/each}
-				</div>
 			{/if}
 		</Card.Root>
 
-		<div class="border-border/50 mt-2 flex flex-col items-start gap-1 border-t pt-4">
+		<div class="border-border/50 mt-2 flex flex-col items-start gap-2 border-t pt-4">
+			<Button variant="outline" href="/items/{item.id}/move">Move</Button>
 			<Button variant="destructive" onclick={handleDelete} disabled={deleting}>
 				{deleting ? 'Deleting…' : 'Delete'}
 			</Button>
