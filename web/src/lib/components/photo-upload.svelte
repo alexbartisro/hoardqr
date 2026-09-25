@@ -7,7 +7,9 @@
 	// anything — that re-encoding also strips EXIF/GPS along the way, per §12.
 	import imageCompression from 'browser-image-compression';
 	import { uploadPhoto } from '$lib/api';
-	import { Button } from '$lib/components/ui/button';
+	import ImagePlus from '@lucide/svelte/icons/image-plus';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import X from '@lucide/svelte/icons/x';
 
 	let {
 		photoUrl = $bindable<string | null>(null),
@@ -62,20 +64,47 @@
 	}
 </script>
 
-<div class="flex flex-col gap-2">
-	{#if photoUrl}
-		<div class="relative w-28">
-			<img src={photoUrl} alt="" class="border-border aspect-square w-28 rounded-md border object-cover" />
+<!-- The tile itself is the add/change control — no separate "Add photo"
+     button beside or below it (feedback 2026-09-25: detail pages had four
+     differently-styled buttons in four places, this was one of them). The ×
+     is a sibling of the tile button inside a relative wrapper, never nested
+     in it: <button> inside <button> is invalid HTML, same class of bug as
+     storage-tree-node's <button>-inside-<a>. -->
+<div class="flex w-24 shrink-0 flex-col gap-1">
+	<div class="relative">
+		<button
+			type="button"
+			aria-label={uploading ? 'Uploading photo' : photoUrl ? 'Change photo' : 'Add photo'}
+			disabled={uploading}
+			onclick={() => fileInput?.click()}
+			class="border-border text-muted-foreground hover:bg-accent/50 focus-visible:ring-ring/50 flex aspect-square w-24 flex-col items-center justify-center gap-1 overflow-hidden rounded-md border text-xs outline-none focus-visible:ring-3 {photoUrl
+				? ''
+				: 'border-dashed'}"
+		>
+			{#if photoUrl}
+				<img src={photoUrl} alt="" class="h-full w-full object-cover {uploading ? 'opacity-40' : ''}" />
+			{:else if uploading}
+				<LoaderCircle class="size-5 animate-spin" />
+				Uploading…
+			{:else}
+				<ImagePlus class="size-5" />
+				Add photo
+			{/if}
+		</button>
+		{#if photoUrl && uploading}
+			<LoaderCircle class="pointer-events-none absolute inset-0 m-auto size-5 animate-spin" />
+		{/if}
+		{#if photoUrl && !uploading}
 			<button
 				type="button"
 				aria-label="Remove photo"
 				onclick={remove}
-				class="bg-background/90 text-foreground absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full border text-xs shadow-sm"
+				class="bg-background/90 text-foreground absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full border shadow-sm"
 			>
-				×
+				<X class="size-3.5" />
 			</button>
-		</div>
-	{/if}
+		{/if}
+	</div>
 
 	<input
 		bind:this={fileInput}
@@ -84,16 +113,6 @@
 		class="hidden"
 		onchange={handleFileChange}
 	/>
-	<Button
-		type="button"
-		variant="outline"
-		size="sm"
-		class="self-start"
-		disabled={uploading}
-		onclick={() => fileInput?.click()}
-	>
-		{uploading ? 'Uploading…' : photoUrl ? 'Change photo' : 'Add photo'}
-	</Button>
 
 	{#if error}<p class="text-destructive text-xs">{error}</p>{/if}
 </div>
