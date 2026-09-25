@@ -33,7 +33,7 @@ func registerTools(s *mcp.Server, pool *pgxpool.Pool) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "add_item",
-		Description: "Catalog a new object and place it in a storage. Accepts the object's full details (description, condition, purchase date/price, receipt URL, tags) up front, not just name/storage/quantity.",
+		Description: "Catalog a new object and place it in a storage. Accepts the object's full details (description, condition, purchase date/price, tags) up front, not just name/storage/quantity.",
 	}, addItemHandler(pool))
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -43,7 +43,7 @@ func registerTools(s *mcp.Server, pool *pgxpool.Pool) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "edit_item",
-		Description: "Change an existing object's fields (name, description, quantity, condition, purchase date/price, receipt URL). Does not move it (see move_item) or change its tags (see add_item_tag/remove_item_tag).",
+		Description: "Change an existing object's fields (name, description, quantity, condition, purchase date/price). Does not move it (see move_item) or change its tags (see add_item_tag/remove_item_tag).",
 	}, editItemHandler(q))
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -320,7 +320,6 @@ type addItemInput struct {
 	Condition     *string  `json:"condition,omitempty" jsonschema:"e.g. new, good, fair, poor"`
 	PurchaseDate  *string  `json:"purchase_date,omitempty" jsonschema:"YYYY-MM-DD"`
 	PurchasePrice *float64 `json:"purchase_price,omitempty"`
-	ReceiptURL    *string  `json:"receipt_url,omitempty"`
 	Tags          []string `json:"tags,omitempty" jsonschema:"tag names to attach — each is created automatically (case-insensitively) if it doesn't exist yet"`
 }
 
@@ -373,7 +372,6 @@ func addItemHandler(pool *pgxpool.Pool) mcp.ToolHandlerFor[addItemInput, addItem
 				Condition:     in.Condition,
 				PurchaseDate:  purchaseDate,
 				PurchasePrice: optionalNumeric(in.PurchasePrice),
-				ReceiptUrl:    in.ReceiptURL,
 				CustomFields:  []byte("{}"),
 			})
 			if err != nil {

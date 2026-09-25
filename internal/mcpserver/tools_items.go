@@ -63,7 +63,6 @@ type editItemInput struct {
 	Condition     *string  `json:"condition,omitempty" jsonschema:"a new condition (e.g. new, good, fair, poor); omit to leave unchanged"`
 	PurchaseDate  *string  `json:"purchase_date,omitempty" jsonschema:"YYYY-MM-DD; omit to leave unchanged"`
 	PurchasePrice *float64 `json:"purchase_price,omitempty" jsonschema:"omit to leave unchanged"`
-	ReceiptURL    *string  `json:"receipt_url,omitempty" jsonschema:"omit to leave unchanged"`
 }
 
 type editItemOutput struct {
@@ -80,7 +79,7 @@ type editItemOutput struct {
 func editItemHandler(q *store.Queries) mcp.ToolHandlerFor[editItemInput, editItemOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in editItemInput) (*mcp.CallToolResult, editItemOutput, error) {
 		if in.Name == nil && in.Description == nil && in.Quantity == nil && in.Condition == nil &&
-			in.PurchaseDate == nil && in.PurchasePrice == nil && in.ReceiptURL == nil {
+			in.PurchaseDate == nil && in.PurchasePrice == nil {
 			return nil, editItemOutput{}, toolErrorf("provide at least one field to change")
 		}
 		var name *string
@@ -110,7 +109,6 @@ func editItemHandler(q *store.Queries) mcp.ToolHandlerFor[editItemInput, editIte
 			Condition:     in.Condition,
 			PurchaseDate:  purchaseDate,
 			PurchasePrice: optionalNumeric(in.PurchasePrice),
-			ReceiptUrl:    in.ReceiptURL,
 		})
 		if err != nil {
 			if isNumericOutOfRange(err) {

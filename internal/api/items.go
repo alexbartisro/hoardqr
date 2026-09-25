@@ -215,7 +215,6 @@ type createItemRequest struct {
 	PhotoURL      *string          `json:"photo_url"`
 	PurchaseDate  *string          `json:"purchase_date"`
 	PurchasePrice *float64         `json:"purchase_price"`
-	ReceiptURL    *string          `json:"receipt_url"`
 	CustomFields  *json.RawMessage `json:"custom_fields"`
 	IsShared      *bool            `json:"is_shared"`
 	Tags          []string         `json:"tags"`
@@ -334,7 +333,6 @@ func (h *ItemsHandler) create(w http.ResponseWriter, r *http.Request) {
 			PhotoUrl:      req.PhotoURL,
 			PurchaseDate:  purchaseDate,
 			PurchasePrice: floatToNumeric(req.PurchasePrice),
-			ReceiptUrl:    req.ReceiptURL,
 			CustomFields:  customFields,
 		})
 		if err != nil {
@@ -476,13 +474,6 @@ func (h *ItemsHandler) update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			set["purchase_price"] = floatToNumeric(v)
-		case "receipt_url":
-			var v *string
-			if err := json.Unmarshal(raw, &v); err != nil {
-				writeError(w, http.StatusBadRequest, "receipt_url must be a string or null")
-				return
-			}
-			set["receipt_url"] = v
 		case "custom_fields":
 			if err := validateCustomFieldsObject(raw); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())

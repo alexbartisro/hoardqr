@@ -13,7 +13,7 @@ import (
 
 const findItemsByNormalizedCode = `-- name: FindItemsByNormalizedCode :many
 
-SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
+SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
@@ -35,7 +35,6 @@ type FindItemsByNormalizedCodeRow struct {
 	PhotoUrl      *string
 	PurchaseDate  pgtype.Date
 	PurchasePrice pgtype.Numeric
-	ReceiptUrl    *string
 	CustomFields  []byte
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
@@ -74,7 +73,6 @@ func (q *Queries) FindItemsByNormalizedCode(ctx context.Context, code string) ([
 			&i.PhotoUrl,
 			&i.PurchaseDate,
 			&i.PurchasePrice,
-			&i.ReceiptUrl,
 			&i.CustomFields,
 			&i.CreatedAt,
 			&i.UpdatedAt,

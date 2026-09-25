@@ -175,7 +175,6 @@ export async function createItem(
 				| 'photo_url'
 				| 'purchase_date'
 				| 'purchase_price'
-				| 'receipt_url'
 				| 'custom_fields'
 				| 'is_shared'
 				| 'tags'

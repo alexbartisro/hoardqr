@@ -153,7 +153,6 @@ type ItemDTO struct {
 	PhotoURL      *string         `json:"photo_url"`
 	PurchaseDate  *string         `json:"purchase_date"`
 	PurchasePrice *float64        `json:"purchase_price"`
-	ReceiptURL    *string         `json:"receipt_url"`
 	CustomFields  json.RawMessage `json:"custom_fields"`
 	CreatedAt     string          `json:"created_at"`
 	UpdatedAt     string          `json:"updated_at"`
@@ -178,7 +177,6 @@ type itemFields struct {
 	PhotoUrl      *string
 	PurchaseDate  pgtype.Date
 	PurchasePrice pgtype.Numeric
-	ReceiptUrl    *string
 	CustomFields  []byte
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
@@ -201,7 +199,6 @@ func toItemDTO(f itemFields, tags []string) ItemDTO {
 		PhotoURL:      f.PhotoUrl,
 		PurchaseDate:  dateToString(f.PurchaseDate),
 		PurchasePrice: numericToFloat64(f.PurchasePrice),
-		ReceiptURL:    f.ReceiptUrl,
 		CustomFields:  customFieldsOrEmpty(f.CustomFields),
 		CreatedAt:     timestamptzToString(f.CreatedAt),
 		UpdatedAt:     timestamptzToString(f.UpdatedAt),
@@ -218,7 +215,7 @@ func toItemDTOFromGetRow(r store.GetItemByIDRow) ItemDTO {
 		ID: r.ID, StorageID: r.StorageID, OwnerID: r.OwnerID, IsShared: r.IsShared,
 		Name: r.Name, Description: r.Description, Quantity: r.Quantity, Condition: r.Condition,
 		QrToken: r.QrToken, PhotoUrl: r.PhotoUrl, PurchaseDate: r.PurchaseDate,
-		PurchasePrice: r.PurchasePrice, ReceiptUrl: r.ReceiptUrl, CustomFields: r.CustomFields,
+		PurchasePrice: r.PurchasePrice, CustomFields: r.CustomFields,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}, r.Tags)
 }
@@ -228,7 +225,7 @@ func toItemDTOFromListRow(r store.ListItemsRow) ItemDTO {
 		ID: r.ID, StorageID: r.StorageID, OwnerID: r.OwnerID, IsShared: r.IsShared,
 		Name: r.Name, Description: r.Description, Quantity: r.Quantity, Condition: r.Condition,
 		QrToken: r.QrToken, PhotoUrl: r.PhotoUrl, PurchaseDate: r.PurchaseDate,
-		PurchasePrice: r.PurchasePrice, ReceiptUrl: r.ReceiptUrl, CustomFields: r.CustomFields,
+		PurchasePrice: r.PurchasePrice, CustomFields: r.CustomFields,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}, r.Tags)
 }
@@ -238,7 +235,7 @@ func toItemDTOFromContentsRow(r store.ListItemsByStorageIDsRow) ItemDTO {
 		ID: r.ID, StorageID: r.StorageID, OwnerID: r.OwnerID, IsShared: r.IsShared,
 		Name: r.Name, Description: r.Description, Quantity: r.Quantity, Condition: r.Condition,
 		QrToken: r.QrToken, PhotoUrl: r.PhotoUrl, PurchaseDate: r.PurchaseDate,
-		PurchasePrice: r.PurchasePrice, ReceiptUrl: r.ReceiptUrl, CustomFields: r.CustomFields,
+		PurchasePrice: r.PurchasePrice, CustomFields: r.CustomFields,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}, r.Tags)
 }
@@ -248,7 +245,7 @@ func toItemDTOFromScanRow(r store.FindItemsByNormalizedCodeRow) ItemDTO {
 		ID: r.ID, StorageID: r.StorageID, OwnerID: r.OwnerID, IsShared: r.IsShared,
 		Name: r.Name, Description: r.Description, Quantity: r.Quantity, Condition: r.Condition,
 		QrToken: r.QrToken, PhotoUrl: r.PhotoUrl, PurchaseDate: r.PurchaseDate,
-		PurchasePrice: r.PurchasePrice, ReceiptUrl: r.ReceiptUrl, CustomFields: r.CustomFields,
+		PurchasePrice: r.PurchasePrice, CustomFields: r.CustomFields,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}, r.Tags)
 }
@@ -258,7 +255,7 @@ func toItemDTOFromRecentRow(r store.ListRecentItemsRow) ItemDTO {
 		ID: r.ID, StorageID: r.StorageID, OwnerID: r.OwnerID, IsShared: r.IsShared,
 		Name: r.Name, Description: r.Description, Quantity: r.Quantity, Condition: r.Condition,
 		QrToken: r.QrToken, PhotoUrl: r.PhotoUrl, PurchaseDate: r.PurchaseDate,
-		PurchasePrice: r.PurchasePrice, ReceiptUrl: r.ReceiptUrl, CustomFields: r.CustomFields,
+		PurchasePrice: r.PurchasePrice, CustomFields: r.CustomFields,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}, r.Tags)
 }

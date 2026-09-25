@@ -31,7 +31,6 @@ type Item struct {
 	PhotoUrl      *string
 	PurchaseDate  pgtype.Date
 	PurchasePrice pgtype.Numeric
-	ReceiptUrl    *string
 	CustomFields  []byte
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz

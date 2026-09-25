@@ -97,9 +97,9 @@ WHERE (
 -- name: InsertItem :one
 INSERT INTO items (
     storage_id, owner_id, is_shared, name, description, quantity, condition,
-    qr_token, photo_url, purchase_date, purchase_price, receipt_url, custom_fields
+    qr_token, photo_url, purchase_date, purchase_price, custom_fields
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING *;
 
 -- Item PATCH is hand-written in internal/api/items.go, same reasoning as
@@ -148,7 +148,6 @@ UPDATE items SET
     condition = COALESCE(sqlc.narg('condition'), condition),
     purchase_date = COALESCE(sqlc.narg('purchase_date'), purchase_date),
     purchase_price = COALESCE(sqlc.narg('purchase_price'), purchase_price),
-    receipt_url = COALESCE(sqlc.narg('receipt_url'), receipt_url),
     updated_at = now()
 WHERE id = sqlc.arg('id')
 RETURNING *;

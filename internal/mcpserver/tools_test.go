@@ -1539,20 +1539,20 @@ func TestMCPToolsEditItemFields(t *testing.T) {
 	callTool(t, cs, "edit_item", map[string]any{
 		"item": "mcp test edit item widget", "name": "MCP Test Edit Item Widget Renamed",
 		"description": "a new description", "quantity": int32(4), "condition": "good",
-		"purchase_date": "2026-01-15", "purchase_price": price, "receipt_url": "https://example.com/r.pdf",
+		"purchase_date": "2026-01-15", "purchase_price": price,
 	}, &edited)
 	if edited.Name != "MCP Test Edit Item Widget Renamed" {
 		t.Fatalf("unexpected edit_item result: %+v", edited)
 	}
 
-	var description, condition, receiptURL *string
+	var description, condition *string
 	var quantity int32
 	var purchaseDate *time.Time
 	var purchasePrice *float64
 	err := pool.QueryRow(ctx,
-		`SELECT description, quantity, condition, purchase_date, purchase_price, receipt_url FROM items WHERE id = $1`,
+		`SELECT description, quantity, condition, purchase_date, purchase_price FROM items WHERE id = $1`,
 		item.ID,
-	).Scan(&description, &quantity, &condition, &purchaseDate, &purchasePrice, &receiptURL)
+	).Scan(&description, &quantity, &condition, &purchaseDate, &purchasePrice)
 	if err != nil {
 		t.Fatalf("checking saved fields: %v", err)
 	}
@@ -1570,9 +1570,6 @@ func TestMCPToolsEditItemFields(t *testing.T) {
 	}
 	if purchasePrice == nil || *purchasePrice != 12.5 {
 		t.Fatalf("expected purchase_price 12.5, got %v", purchasePrice)
-	}
-	if receiptURL == nil || *receiptURL != "https://example.com/r.pdf" {
-		t.Fatalf("expected receipt_url to be saved, got %v", receiptURL)
 	}
 }
 
@@ -1752,8 +1749,8 @@ func TestMCPToolsAddItemAcceptsFullFieldsAndTags(t *testing.T) {
 	callTool(t, cs, "add_item", map[string]any{
 		"name": "MCP Test Full Fields Widget", "storage": "MCP Test Full Fields Storage",
 		"description": "full field test", "condition": "new", "purchase_date": "2026-02-01",
-		"purchase_price": price, "receipt_url": "https://example.com/receipt.pdf",
-		"tags": []string{"MCP Test Full Fields TagA", "MCP Test Full Fields TagB"},
+		"purchase_price": price,
+		"tags":           []string{"MCP Test Full Fields TagA", "MCP Test Full Fields TagB"},
 	}, &item)
 	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE name LIKE 'MCP Test %'`) })
 	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM tags WHERE name LIKE 'MCP Test %'`) })

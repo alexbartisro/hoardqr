@@ -43,7 +43,6 @@ export interface Item {
 	photo_url: string | null;
 	purchase_date: string | null;
 	purchase_price: number | null;
-	receipt_url: string | null;
 	custom_fields: Record<string, unknown>;
 	created_at: string;
 	updated_at: string;

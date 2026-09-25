@@ -45,7 +45,7 @@ func (q *Queries) DeleteItem(ctx context.Context, id int64) error {
 }
 
 const findItemsByExactName = `-- name: FindItemsByExactName :many
-SELECT id, storage_id, owner_id, is_shared, name, description, quantity, condition, qr_token, photo_url, purchase_date, purchase_price, receipt_url, custom_fields, created_at, updated_at FROM items WHERE lower(name) = lower($1::text)
+SELECT id, storage_id, owner_id, is_shared, name, description, quantity, condition, qr_token, photo_url, purchase_date, purchase_price, custom_fields, created_at, updated_at FROM items WHERE lower(name) = lower($1::text)
 `
 
 // Exact (case-insensitive) match, deliberately not fuzzy — used by
@@ -76,7 +76,6 @@ func (q *Queries) FindItemsByExactName(ctx context.Context, name string) ([]Item
 			&i.PhotoUrl,
 			&i.PurchaseDate,
 			&i.PurchasePrice,
-			&i.ReceiptUrl,
 			&i.CustomFields,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -93,7 +92,7 @@ func (q *Queries) FindItemsByExactName(ctx context.Context, name string) ([]Item
 
 const getItemByID = `-- name: GetItemByID :one
 
-SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
+SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
@@ -114,7 +113,6 @@ type GetItemByIDRow struct {
 	PhotoUrl      *string
 	PurchaseDate  pgtype.Date
 	PurchasePrice pgtype.Numeric
-	ReceiptUrl    *string
 	CustomFields  []byte
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
@@ -140,7 +138,6 @@ func (q *Queries) GetItemByID(ctx context.Context, id int64) (GetItemByIDRow, er
 		&i.PhotoUrl,
 		&i.PurchaseDate,
 		&i.PurchasePrice,
-		&i.ReceiptUrl,
 		&i.CustomFields,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -176,10 +173,10 @@ func (q *Queries) GetTagByNameCI(ctx context.Context, lower string) (Tag, error)
 const insertItem = `-- name: InsertItem :one
 INSERT INTO items (
     storage_id, owner_id, is_shared, name, description, quantity, condition,
-    qr_token, photo_url, purchase_date, purchase_price, receipt_url, custom_fields
+    qr_token, photo_url, purchase_date, purchase_price, custom_fields
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-RETURNING id, storage_id, owner_id, is_shared, name, description, quantity, condition, qr_token, photo_url, purchase_date, purchase_price, receipt_url, custom_fields, created_at, updated_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+RETURNING id, storage_id, owner_id, is_shared, name, description, quantity, condition, qr_token, photo_url, purchase_date, purchase_price, custom_fields, created_at, updated_at
 `
 
 type InsertItemParams struct {
@@ -194,7 +191,6 @@ type InsertItemParams struct {
 	PhotoUrl      *string
 	PurchaseDate  pgtype.Date
 	PurchasePrice pgtype.Numeric
-	ReceiptUrl    *string
 	CustomFields  []byte
 }
 
@@ -211,7 +207,6 @@ func (q *Queries) InsertItem(ctx context.Context, arg InsertItemParams) (Item, e
 		arg.PhotoUrl,
 		arg.PurchaseDate,
 		arg.PurchasePrice,
-		arg.ReceiptUrl,
 		arg.CustomFields,
 	)
 	var i Item
@@ -228,7 +223,6 @@ func (q *Queries) InsertItem(ctx context.Context, arg InsertItemParams) (Item, e
 		&i.PhotoUrl,
 		&i.PurchaseDate,
 		&i.PurchasePrice,
-		&i.ReceiptUrl,
 		&i.CustomFields,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -276,7 +270,7 @@ const listItems = `-- name: ListItems :many
 WITH params AS (
     SELECT replace(replace(replace($2::text, '\', '\\'), '%', '\%'), '_', '\_') AS q_escaped
 )
-SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
+SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
@@ -312,7 +306,6 @@ type ListItemsRow struct {
 	PhotoUrl      *string
 	PurchaseDate  pgtype.Date
 	PurchasePrice pgtype.Numeric
-	ReceiptUrl    *string
 	CustomFields  []byte
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
@@ -349,7 +342,6 @@ func (q *Queries) ListItems(ctx context.Context, arg ListItemsParams) ([]ListIte
 			&i.PhotoUrl,
 			&i.PurchaseDate,
 			&i.PurchasePrice,
-			&i.ReceiptUrl,
 			&i.CustomFields,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -366,7 +358,7 @@ func (q *Queries) ListItems(ctx context.Context, arg ListItemsParams) ([]ListIte
 }
 
 const listItemsByStorageIDs = `-- name: ListItemsByStorageIDs :many
-SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
+SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
@@ -388,7 +380,6 @@ type ListItemsByStorageIDsRow struct {
 	PhotoUrl      *string
 	PurchaseDate  pgtype.Date
 	PurchasePrice pgtype.Numeric
-	ReceiptUrl    *string
 	CustomFields  []byte
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
@@ -419,7 +410,6 @@ func (q *Queries) ListItemsByStorageIDs(ctx context.Context, storageIds []int64)
 			&i.PhotoUrl,
 			&i.PurchaseDate,
 			&i.PurchasePrice,
-			&i.ReceiptUrl,
 			&i.CustomFields,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -436,7 +426,7 @@ func (q *Queries) ListItemsByStorageIDs(ctx context.Context, storageIds []int64)
 }
 
 const listRecentItems = `-- name: ListRecentItems :many
-SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.receipt_url, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
+SELECT i.id, i.storage_id, i.owner_id, i.is_shared, i.name, i.description, i.quantity, i.condition, i.qr_token, i.photo_url, i.purchase_date, i.purchase_price, i.custom_fields, i.created_at, i.updated_at, COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}')::text[] AS tags
 FROM items i
 LEFT JOIN item_tags it ON it.item_id = i.id
 LEFT JOIN tags t ON t.id = it.tag_id
@@ -471,7 +461,6 @@ type ListRecentItemsRow struct {
 	PhotoUrl      *string
 	PurchaseDate  pgtype.Date
 	PurchasePrice pgtype.Numeric
-	ReceiptUrl    *string
 	CustomFields  []byte
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
@@ -516,7 +505,6 @@ func (q *Queries) ListRecentItems(ctx context.Context, arg ListRecentItemsParams
 			&i.PhotoUrl,
 			&i.PurchaseDate,
 			&i.PurchasePrice,
-			&i.ReceiptUrl,
 			&i.CustomFields,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -620,10 +608,9 @@ UPDATE items SET
     condition = COALESCE($4, condition),
     purchase_date = COALESCE($5, purchase_date),
     purchase_price = COALESCE($6, purchase_price),
-    receipt_url = COALESCE($7, receipt_url),
     updated_at = now()
-WHERE id = $8
-RETURNING id, storage_id, owner_id, is_shared, name, description, quantity, condition, qr_token, photo_url, purchase_date, purchase_price, receipt_url, custom_fields, created_at, updated_at
+WHERE id = $7
+RETURNING id, storage_id, owner_id, is_shared, name, description, quantity, condition, qr_token, photo_url, purchase_date, purchase_price, custom_fields, created_at, updated_at
 `
 
 type UpdateItemFieldsParams struct {
@@ -633,7 +620,6 @@ type UpdateItemFieldsParams struct {
 	Condition     *string
 	PurchaseDate  pgtype.Date
 	PurchasePrice pgtype.Numeric
-	ReceiptUrl    *string
 	ID            int64
 }
 
@@ -653,7 +639,6 @@ func (q *Queries) UpdateItemFields(ctx context.Context, arg UpdateItemFieldsPara
 		arg.Condition,
 		arg.PurchaseDate,
 		arg.PurchasePrice,
-		arg.ReceiptUrl,
 		arg.ID,
 	)
 	var i Item
@@ -670,7 +655,6 @@ func (q *Queries) UpdateItemFields(ctx context.Context, arg UpdateItemFieldsPara
 		&i.PhotoUrl,
 		&i.PurchaseDate,
 		&i.PurchasePrice,
-		&i.ReceiptUrl,
 		&i.CustomFields,
 		&i.CreatedAt,
 		&i.UpdatedAt,

@@ -27,7 +27,7 @@
 	let renameInput = $state<HTMLInputElement | null>(null);
 
 	// Details editor (description, quantity, condition, purchase date/price,
-	// receipt, tags) — draft copies, not bound straight to `item`, so Cancel
+	// tags) — draft copies, not bound straight to `item`, so Cancel
 	// can revert without ever having written anything (see PhotoUpload's
 	// bind:photoUrl={item.photo_url} above for the contrasting
 	// immediate-save case, which has no Cancel because there's nothing to
@@ -39,7 +39,6 @@
 	let draftCondition = $state('');
 	let draftPurchaseDate = $state('');
 	let draftPurchasePrice = $state('');
-	let draftReceiptUrl = $state('');
 	let draftTags = $state<Set<string>>(new Set());
 	let detailsError = $state<string | null>(null);
 	let savingDetails = $state(false);
@@ -144,7 +143,6 @@
 		draftCondition = item.condition ?? '';
 		draftPurchaseDate = item.purchase_date ?? '';
 		draftPurchasePrice = item.purchase_price != null ? String(item.purchase_price) : '';
-		draftReceiptUrl = item.receipt_url ?? '';
 		draftTags = new Set(item.tags);
 		detailsError = null;
 		editingDetails = true;
@@ -172,7 +170,6 @@
 				condition: draftCondition.trim() || null,
 				purchase_date: draftPurchaseDate || null,
 				purchase_price: priceInput && !Number.isNaN(parsedPrice) ? parsedPrice : null,
-				receipt_url: draftReceiptUrl.trim() || null,
 				tags: [...draftTags]
 			});
 			if (seq !== loadSeq) return;
@@ -395,16 +392,6 @@
 						</div>
 					</div>
 					<div class="flex flex-col gap-1.5">
-						<label for="receipt-url" class="text-sm font-medium">Receipt URL</label>
-						<Input
-							id="receipt-url"
-							type="url"
-							bind:value={draftReceiptUrl}
-							disabled={savingDetails}
-							placeholder="https://…"
-						/>
-					</div>
-					<div class="flex flex-col gap-1.5">
 						<span class="text-sm font-medium">Tags</span>
 						<TagInput id="tags" bind:tags={draftTags} />
 					</div>
@@ -446,19 +433,6 @@
 					{#if item.purchase_price != null}
 						<div class="flex justify-between">
 							<span class="text-muted-foreground">Price</span><span>{item.purchase_price}</span>
-						</div>
-					{/if}
-					{#if item.receipt_url}
-						<div class="flex justify-between">
-							<span class="text-muted-foreground">Receipt</span>
-							<a
-								href={item.receipt_url}
-								target="_blank"
-								rel="noopener noreferrer"
-								class="text-primary hover:underline"
-							>
-								View receipt →
-							</a>
 						</div>
 					{/if}
 					{#if !item.is_shared}
