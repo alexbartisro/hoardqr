@@ -10,6 +10,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import QrScanner from '$lib/components/qr-scanner.svelte';
+	import LabelOcr from '$lib/components/label-ocr.svelte';
 
 	let {
 		storageId = $bindable<number | null>(null),
@@ -30,11 +31,6 @@
 
 	let pickerItems = $state<Item[] | null>(null); // ambiguous scan/resolve result (§6)
 	let resolveError = $state<string | null>(null);
-
-	let videoEl = $state<HTMLVideoElement | null>(null);
-	let ocrStream = $state<MediaStream | null>(null);
-	let ocrBusy = $state(false);
-	let ocrError = $state<string | null>(null);
 
 	let searchTimer: ReturnType<typeof setTimeout> | undefined;
 	// Clearing the timer only stops a call that hasn't fired yet — it doesn't cancel
@@ -60,12 +56,6 @@
 			}
 		}, 200);
 		return () => clearTimeout(searchTimer);
-	});
-
-	$effect(() => {
-		return () => {
-			stopOcrCamera();
-		};
 	});
 
 	async function resolveTo(id: number) {
@@ -101,72 +91,15 @@
 		await resolveTo(item.storage_id);
 	}
 
-	async function startOcrCamera() {
-		ocrError = null;
-		try {
-			ocrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-		} catch (e) {
-			ocrError = e instanceof Error ? e.message : 'Could not access camera.';
-		}
+	function handleOcrRecognized(text: string) {
+		// Recognized text feeds the same resolution path as typing (§7) — the
+		// unified search query sorts out on its own whether it's a code or a name.
+		query = text;
+		tab = 'type';
 	}
 
-	function stopOcrCamera() {
-		ocrStream?.getTracks().forEach((t) => t.stop());
-		ocrStream = null;
-	}
-
-	// `videoEl` (bound inside Tabs.Content) isn't guaranteed to exist yet the instant
-	// startOcrCamera()'s getUserMedia promise resolves — the 'ocr' tab's DOM hasn't
-	// necessarily flushed. Attaching the stream reactively, keyed off both existing,
-	// avoids a live stream with no preview and a 0×0 canvas silently fed to Tesseract.
-	$effect(() => {
-		if (videoEl && ocrStream) videoEl.srcObject = ocrStream;
-	});
-
-	async function captureAndRead() {
-		if (!videoEl) return;
-		ocrBusy = true;
-		ocrError = null;
-		try {
-			const canvas = document.createElement('canvas');
-			canvas.width = videoEl.videoWidth;
-			canvas.height = videoEl.videoHeight;
-			canvas.getContext('2d')?.drawImage(videoEl, 0, 0);
-			const { default: Tesseract } = await import('tesseract.js');
-			const {
-				data: { text }
-			} = await Tesseract.recognize(canvas, 'eng+ron', {
-				// Self-hosted (scripts/vendor-tesseract-assets.mjs) — no runtime CDN
-				// dependency. corePath names a specific file to skip SIMD
-				// feature-detection; the data packages only publish gzip'd trained data.
-				workerPath: '/tesseract/worker.min.js',
-				corePath: '/tesseract/tesseract-core-lstm.wasm.js',
-				langPath: '/tesseract',
-				gzip: true
-			});
-			const recognized = text.trim();
-			if (!recognized) {
-				ocrError = 'Could not read any text — try typing instead.';
-				return;
-			}
-			// Recognized text feeds the same resolution path as typing (§7) — the
-			// unified search query sorts out on its own whether it's a code or a name.
-			query = recognized;
-			await switchTab('type'); // not a direct `tab =` assignment — that would skip stopOcrCamera()
-		} catch (e) {
-			ocrError = e instanceof Error ? e.message : 'OCR failed.';
-		} finally {
-			ocrBusy = false;
-		}
-	}
-
-	async function switchTab(next: 'type' | 'scan' | 'ocr') {
-		// OCR wants exclusive camera access — await teardown before the next tab
-		// claims the device. QrScanner handles its own teardown on unmount (it's
-		// only mounted while tab === 'scan', below), so nothing to do for it here.
-		if (tab === 'ocr' && next !== 'ocr') stopOcrCamera();
+	function switchTab(next: 'type' | 'scan' | 'ocr') {
 		tab = next;
-		if (next === 'ocr') await startOcrCamera();
 	}
 </script>
 
@@ -229,12 +162,9 @@
 			</Tabs.Content>
 
 			<Tabs.Content value="ocr" class="flex flex-col gap-2">
-				<!-- svelte-ignore a11y_media_has_caption -->
-				<video bind:this={videoEl} autoplay playsinline muted class="mx-auto w-full max-w-xs rounded-md"></video>
-				<Button onclick={captureAndRead} disabled={ocrBusy || !ocrStream}>
-					{ocrBusy ? 'Reading…' : 'Capture & read'}
-				</Button>
-				{#if ocrError}<p class="text-destructive text-sm">{ocrError}</p>{/if}
+				{#if tab === 'ocr'}
+					<LabelOcr onRecognized={handleOcrRecognized} />
+				{/if}
 			</Tabs.Content>
 		</Tabs.Root>
 
