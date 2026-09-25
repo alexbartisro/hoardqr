@@ -240,11 +240,16 @@
 						</div>
 
 						<div class="flex gap-4">
-							<div class="flex flex-1 flex-col gap-1.5">
+							<div class="flex min-w-0 flex-1 flex-col gap-1.5">
 								<label for={`purchase-date-${draft.id}`} class="text-sm font-medium">Purchased</label>
-								<Input id={`purchase-date-${draft.id}`} type="date" bind:value={draft.purchaseDate} />
+								<Input
+									id={`purchase-date-${draft.id}`}
+									type="date"
+									class="appearance-none [&::-webkit-date-and-time-value]:text-left"
+									bind:value={draft.purchaseDate}
+								/>
 							</div>
-							<div class="flex flex-1 flex-col gap-1.5">
+							<div class="flex min-w-0 flex-1 flex-col gap-1.5">
 								<label for={`purchase-price-${draft.id}`} class="text-sm font-medium">Price</label>
 								<Input
 									id={`purchase-price-${draft.id}`}

@@ -372,16 +372,17 @@
 						</select>
 					</div>
 					<div class="flex gap-4">
-						<div class="flex flex-1 flex-col gap-1.5">
+						<div class="flex min-w-0 flex-1 flex-col gap-1.5">
 							<label for="purchase-date" class="text-sm font-medium">Purchased</label>
 							<Input
 								id="purchase-date"
 								type="date"
+								class="appearance-none [&::-webkit-date-and-time-value]:text-left"
 								bind:value={draftPurchaseDate}
 								disabled={savingDetails}
 							/>
 						</div>
-						<div class="flex flex-1 flex-col gap-1.5">
+						<div class="flex min-w-0 flex-1 flex-col gap-1.5">
 							<label for="purchase-price" class="text-sm font-medium">Price</label>
 							<Input
 								id="purchase-price"
