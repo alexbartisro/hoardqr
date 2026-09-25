@@ -11,6 +11,8 @@
 	import { CONDITIONS } from '$lib/constants';
 	import Printer from '@lucide/svelte/icons/printer';
 	import Pencil from '@lucide/svelte/icons/pencil';
+	import FolderInput from '@lucide/svelte/icons/folder-input';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 
 	let item = $state<Item | null>(null);
 	let breadcrumb = $state<Breadcrumb>([]);
@@ -195,6 +197,9 @@
 			deleting = false;
 		}
 	}
+
+	// Shared by all four buttons in the header's action row.
+	const actionClass = 'h-auto flex-col gap-1 px-1 py-2 text-xs font-normal';
 </script>
 
 <div class="flex flex-col gap-4">
@@ -274,21 +279,46 @@
 						{#if photoSaveError}<p class="text-destructive mt-1 text-xs">{photoSaveError}</p>{/if}
 					</div>
 				</div>
-				<div class="border-border/50 mt-3 flex items-center gap-2 border-t pt-3">
+				<!-- Every action on this item lives in this one row, one style:
+				     icon over a short label, four equal columns (fits a 320px
+				     screen, where four icon+text ghost buttons side by side
+				     don't). Feedback 2026-09-25 — the page previously had four
+				     differently-styled buttons in four places (outline "Add
+				     photo", ghost Print/Rename, a full-width outline Move and an
+				     intrinsic-width Delete in a separate footer). Delete used to
+				     be isolated in that footer against mis-clicks; it now sits
+				     last, in red, and still goes through confirm(). -->
+				<div class="border-border/50 mt-3 border-t pt-3">
 					{#if renaming}
-						<Button size="sm" onclick={saveRename} disabled={savingRename}>
-							{savingRename ? 'Saving…' : 'Save'}
-						</Button>
-						<Button variant="outline" size="sm" onclick={() => (renaming = false)} disabled={savingRename}>
-							Cancel
-						</Button>
+						<div class="flex gap-2">
+							<Button size="sm" onclick={saveRename} disabled={savingRename}>
+								{savingRename ? 'Saving…' : 'Save'}
+							</Button>
+							<Button variant="outline" size="sm" onclick={() => (renaming = false)} disabled={savingRename}>
+								Cancel
+							</Button>
+						</div>
 					{:else}
-						<Button variant="ghost" size="sm" href="/items/{item.id}/label">
-							<Printer /> Print label
-						</Button>
-						<Button variant="ghost" size="sm" onclick={startRename}>
-							<Pencil /> Rename
-						</Button>
+						<div class="grid grid-cols-4 gap-1">
+							<Button variant="ghost" href="/items/{item.id}/label" class={actionClass}>
+								<Printer class="size-5" /> Label
+							</Button>
+							<Button variant="ghost" onclick={startRename} class={actionClass}>
+								<Pencil class="size-5" /> Rename
+							</Button>
+							<Button variant="ghost" href="/items/{item.id}/move" class={actionClass}>
+								<FolderInput class="size-5" /> Move
+							</Button>
+							<Button
+								variant="ghost"
+								onclick={handleDelete}
+								disabled={deleting}
+								class="{actionClass} text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/20"
+							>
+								<Trash2 class="size-5" />
+								{deleting ? 'Deleting…' : 'Delete'}
+							</Button>
+						</div>
 					{/if}
 				</div>
 			</Card.Header>
@@ -301,7 +331,7 @@
 			<div class="flex items-center justify-between">
 				<span class="text-muted-foreground text-xs font-medium tracking-wide uppercase">Details</span>
 				{#if !editingDetails}
-					<Button variant="ghost" size="sm" onclick={startEditDetails}>Edit</Button>
+					<Button variant="ghost" size="sm" class="-my-1.5 -mr-2" onclick={startEditDetails}><Pencil /> Edit</Button>
 				{/if}
 			</div>
 			{#if editingDetails}
@@ -443,17 +473,5 @@
 				</Card.Content>
 			{/if}
 		</Card.Root>
-
-		<!-- Move is full-width (structural but reversible, benefits from a
-		     larger touch target); Delete stays intrinsic-width via self-start
-		     now that the container no longer stretches it — deliberate
-		     asymmetry, not a leftover: a full-width Delete would maximize the
-		     exact mis-click risk this footer already exists to avoid. -->
-		<div class="border-border/50 mt-2 flex flex-col gap-2 border-t pt-4">
-			<Button variant="outline" href="/items/{item.id}/move" class="w-full">Move</Button>
-			<Button variant="destructive" onclick={handleDelete} disabled={deleting} class="self-start">
-				{deleting ? 'Deleting…' : 'Delete'}
-			</Button>
-		</div>
 	{/if}
 </div>
