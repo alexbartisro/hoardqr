@@ -5,6 +5,7 @@
 	import { getLocations, getStorages, createLocation, updateLocation, deleteLocation } from '$lib/api';
 	import { ApiError, type Location } from '$lib/types';
 	import * as Card from '$lib/components/ui/card';
+	import Boxes from '@lucide/svelte/icons/boxes';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 
@@ -179,6 +180,7 @@
 								</Button>
 							</div>
 						{:else}
+							<Boxes class="text-muted-foreground size-4 shrink-0" />
 							<div class="flex min-w-0 flex-1 flex-col">
 								<span class="truncate font-medium">{loc.name}</span>
 								<span class="text-muted-foreground text-xs">

@@ -3,7 +3,7 @@
 	import { getRecentItems } from '$lib/api';
 	import type { Item } from '$lib/types';
 	import * as Card from '$lib/components/ui/card';
-	import Package from '@lucide/svelte/icons/package';
+	import Wrench from '@lucide/svelte/icons/wrench';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import { Button } from '$lib/components/ui/button';
 
@@ -107,7 +107,7 @@
 				<a href="/items/{item.id}" class="block">
 					<Card.Root variant="glass" class="p-3">
 						<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
-							<Package class="text-muted-foreground size-4 shrink-0" />
+							<Wrench class="text-muted-foreground size-4 shrink-0" />
 							<div class="flex min-w-0 flex-1 flex-col">
 								<span class="truncate font-medium">{item.name}</span>
 								<span class="text-muted-foreground truncate text-xs">{breadcrumb}</span>

@@ -3,8 +3,7 @@
 	import type { Storage } from '$lib/types';
 	import * as Card from '$lib/components/ui/card';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import Folder from '@lucide/svelte/icons/folder';
-	import FolderOpen from '@lucide/svelte/icons/folder-open';
+	import Box from '@lucide/svelte/icons/box';
 	// Self-import for recursion — a child node is the same component as its
 	// parent, one level down.
 	import StorageTreeNode from './storage-tree-node.svelte';
@@ -55,11 +54,7 @@
 			<ChevronRight class="size-4 transition-transform {expanded ? 'rotate-90' : ''}" />
 		</button>
 		<a href="/storages/{storage.id}" class="flex min-w-0 flex-1 items-center gap-2">
-			{#if expanded}
-				<FolderOpen class="text-muted-foreground size-4 shrink-0" />
-			{:else}
-				<Folder class="text-muted-foreground size-4 shrink-0" />
-			{/if}
+			<Box class="text-muted-foreground size-4 shrink-0" />
 			<span class="truncate">{storage.name}</span>
 		</a>
 	</Card.Content>

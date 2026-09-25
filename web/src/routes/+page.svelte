@@ -1,9 +1,8 @@
 <script lang="ts">
 	import * as Card from '$lib/components/ui/card';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
-	import Package from '@lucide/svelte/icons/package';
-	import FolderPlus from '@lucide/svelte/icons/folder-plus';
-	import Folder from '@lucide/svelte/icons/folder';
+	import Wrench from '@lucide/svelte/icons/wrench';
+	import Box from '@lucide/svelte/icons/box';
 	import { getRecentItems, getStorages } from '$lib/api';
 	import type { Item, Storage } from '$lib/types';
 
@@ -65,7 +64,7 @@
 		<a href="/items/new" class="block">
 			<Card.Root variant="glass" class="transition-transform active:scale-[0.98]">
 				<Card.Content class="flex flex-col items-center gap-2 py-2 text-center">
-					<Package class="text-primary size-7" />
+					<Wrench class="text-primary size-7" />
 					<Card.Title class="text-sm">Add Object</Card.Title>
 				</Card.Content>
 			</Card.Root>
@@ -74,7 +73,7 @@
 		<a href="/storages/new" class="block">
 			<Card.Root variant="glass" class="transition-transform active:scale-[0.98]">
 				<Card.Content class="flex flex-col items-center gap-2 py-2 text-center">
-					<FolderPlus class="text-primary size-7" />
+					<Box class="text-primary size-7" />
 					<Card.Title class="text-sm">Add Storage</Card.Title>
 				</Card.Content>
 			</Card.Root>
@@ -100,7 +99,7 @@
 				<a href="/storages/{storage.id}" class="block">
 					<Card.Root variant="glass" class="p-3">
 						<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
-							<Folder class="text-muted-foreground size-4 shrink-0" />
+							<Box class="text-muted-foreground size-4 shrink-0" />
 							<span class="min-w-0 flex-1 truncate">{storage.name}</span>
 							<ChevronRight class="text-muted-foreground/60 size-4 shrink-0" />
 						</Card.Content>
@@ -129,7 +128,7 @@
 				<a href="/items/{item.id}" class="block">
 					<Card.Root variant="glass" class="p-3">
 						<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
-							<Package class="text-muted-foreground size-4 shrink-0" />
+							<Wrench class="text-muted-foreground size-4 shrink-0" />
 							<div class="flex min-w-0 flex-1 flex-col">
 								<span class="truncate font-medium">{item.name}</span>
 								<span class="text-muted-foreground truncate text-xs">{breadcrumb}</span>

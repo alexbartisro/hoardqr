@@ -6,8 +6,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import ScanLine from '@lucide/svelte/icons/scan-line';
 	import House from '@lucide/svelte/icons/house';
-	import Boxes from '@lucide/svelte/icons/boxes';
-	import Package from '@lucide/svelte/icons/package';
+	import Box from '@lucide/svelte/icons/box';
+	import Wrench from '@lucide/svelte/icons/wrench';
 
 	let { children } = $props();
 
@@ -28,14 +28,14 @@
 		{
 			href: '/storages',
 			label: 'Storage',
-			icon: Boxes,
+			icon: Box,
 			// /locations (manage Locations) is reached from and conceptually
 			// part of the Storage section too — same startsWith-not-exact-match
 			// rationale as Storage/Objects already using it for /storages/42
 			// and /items/new.
 			active: () => page.url.pathname.startsWith('/storages') || page.url.pathname.startsWith('/locations')
 		},
-		{ href: '/items', label: 'Objects', icon: Package, active: () => page.url.pathname.startsWith('/items') }
+		{ href: '/items', label: 'Objects', icon: Wrench, active: () => page.url.pathname.startsWith('/items') }
 	];
 </script>
 

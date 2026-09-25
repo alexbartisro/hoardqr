@@ -3,6 +3,7 @@
 	import type { Storage } from '$lib/types';
 	import StorageTreeNode from '$lib/components/storage-tree-node.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import Boxes from '@lucide/svelte/icons/boxes';
 
 	let roots = $state<Storage[]>([]);
 	let loading = $state(true);
@@ -69,7 +70,7 @@
 	{:else}
 		{#each groups as [name, storages] (name)}
 			<div class="flex flex-col gap-2">
-				<h2 class="text-muted-foreground text-sm font-medium">{name}</h2>
+				<h2 class="text-muted-foreground flex items-center gap-1.5 text-sm font-medium">{#if name !== 'Unassigned'}<Boxes class="size-4 shrink-0" />{/if}{name}</h2>
 				{#each storages as storage (storage.id)}
 					<StorageTreeNode {storage} />
 				{/each}

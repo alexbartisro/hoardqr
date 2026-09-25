@@ -11,7 +11,7 @@
 	import { CONDITIONS } from '$lib/constants';
 	import Printer from '@lucide/svelte/icons/printer';
 	import Pencil from '@lucide/svelte/icons/pencil';
-	import FolderInput from '@lucide/svelte/icons/folder-input';
+	import MoveIcon from '@lucide/svelte/icons/move';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 
 	let item = $state<Item | null>(null);
@@ -307,7 +307,7 @@
 								<Pencil class="size-5" /> Rename
 							</Button>
 							<Button variant="ghost" href="/items/{item.id}/move" class={actionClass}>
-								<FolderInput class="size-5" /> Move
+								<MoveIcon class="size-5" /> Move
 							</Button>
 							<Button
 								variant="ghost"

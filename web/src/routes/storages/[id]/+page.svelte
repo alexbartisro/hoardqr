@@ -14,10 +14,10 @@
 	import LocationSelect from '$lib/components/location-select.svelte';
 	import Printer from '@lucide/svelte/icons/printer';
 	import Pencil from '@lucide/svelte/icons/pencil';
-	import FolderInput from '@lucide/svelte/icons/folder-input';
+	import MoveIcon from '@lucide/svelte/icons/move';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import Folder from '@lucide/svelte/icons/folder';
-	import Package from '@lucide/svelte/icons/package';
+	import Box from '@lucide/svelte/icons/box';
+	import Wrench from '@lucide/svelte/icons/wrench';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 
 	let storage = $state<Storage | null>(null);
@@ -338,7 +338,7 @@
 								<Pencil class="size-5" /> Rename
 							</Button>
 							<Button variant="ghost" href="/storages/{storage.id}/move" class={actionClass}>
-								<FolderInput class="size-5" /> Move
+								<MoveIcon class="size-5" /> Move
 							</Button>
 							<Button
 								variant="ghost"
@@ -412,7 +412,7 @@
 					<a href="/storages/{c.id}" class="block">
 						<Card.Root variant="glass" class="p-3">
 							<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
-								<Folder class="text-muted-foreground size-4 shrink-0" />
+								<Box class="text-muted-foreground size-4 shrink-0" />
 								<span class="min-w-0 flex-1 truncate">{c.name}</span>
 								<ChevronRight class="text-muted-foreground/60 size-4 shrink-0" />
 							</Card.Content>
@@ -429,7 +429,7 @@
 					<a href="/items/{it.id}" class="block">
 						<Card.Root variant="glass" class="p-3">
 							<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
-								<Package class="text-muted-foreground size-4 shrink-0" />
+								<Wrench class="text-muted-foreground size-4 shrink-0" />
 								<span class="min-w-0 flex-1 truncate">{it.name}</span>
 								<ChevronRight class="text-muted-foreground/60 size-4 shrink-0" />
 							</Card.Content>
