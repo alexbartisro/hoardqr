@@ -65,7 +65,7 @@
 			<Card.Root variant="glass" class="transition-transform active:scale-[0.98]">
 				<Card.Content class="flex flex-col items-center gap-2 py-2 text-center">
 					<Wrench class="text-primary size-7" />
-					<Card.Title class="text-sm">Add Object</Card.Title>
+					<Card.Title class="text-sm">Add Item</Card.Title>
 				</Card.Content>
 			</Card.Root>
 		</a>

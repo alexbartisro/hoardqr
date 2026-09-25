@@ -35,7 +35,7 @@
 			// and /items/new.
 			active: () => page.url.pathname.startsWith('/storages') || page.url.pathname.startsWith('/locations')
 		},
-		{ href: '/items', label: 'Objects', icon: Wrench, active: () => page.url.pathname.startsWith('/items') }
+		{ href: '/items', label: 'Items', icon: Wrench, active: () => page.url.pathname.startsWith('/items') }
 	];
 </script>
 

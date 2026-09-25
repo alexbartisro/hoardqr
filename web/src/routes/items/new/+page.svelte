@@ -140,7 +140,7 @@
 				await goto(`/storages/${targetStorageId}`);
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to store object(s).';
+			error = e instanceof Error ? e.message : 'Failed to store item(s).';
 		} finally {
 			submitting = false;
 		}
@@ -148,7 +148,7 @@
 </script>
 
 <div class="flex flex-col gap-6">
-	<h1 class="text-xl font-semibold">Add Object</h1>
+	<h1 class="text-xl font-semibold">Add Item</h1>
 
 	<Card.Root variant="glass" class="p-4">
 		<Card.Content class="flex flex-col gap-3 p-0">
@@ -180,7 +180,7 @@
 						{#if drafts.length > 1}
 							<div class="flex items-center justify-between">
 								<span class="text-muted-foreground text-xs font-semibold uppercase">
-									Object {i + 1}
+									Item {i + 1}
 								</span>
 								<Button variant="ghost" size="sm" onclick={() => removeDraft(draft.id)}>
 									Remove
@@ -270,7 +270,7 @@
 				{#if error}<p class="text-destructive text-sm">{error}</p>{/if}
 
 				<Button onclick={submit} disabled={submitting || !drafts.some((d) => d.name.trim())}>
-					{submitting ? 'Storing…' : 'Store Object'}
+					{submitting ? 'Storing…' : 'Store Item'}
 				</Button>
 			</Card.Content>
 		</Card.Root>
