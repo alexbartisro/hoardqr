@@ -16,7 +16,7 @@
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import FolderInput from '@lucide/svelte/icons/folder-input';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import Box from '@lucide/svelte/icons/box';
+	import Folder from '@lucide/svelte/icons/folder';
 	import Package from '@lucide/svelte/icons/package';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 
@@ -412,7 +412,7 @@
 					<a href="/storages/{c.id}" class="block">
 						<Card.Root variant="glass" class="p-3">
 							<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
-								<Box class="text-muted-foreground size-4 shrink-0" />
+								<Folder class="text-muted-foreground size-4 shrink-0" />
 								<span class="min-w-0 flex-1 truncate">{c.name}</span>
 								<ChevronRight class="text-muted-foreground/60 size-4 shrink-0" />
 							</Card.Content>

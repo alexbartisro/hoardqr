@@ -1,5 +1,6 @@
 <script lang="ts">
 	import * as Card from '$lib/components/ui/card';
+	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Package from '@lucide/svelte/icons/package';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import Folder from '@lucide/svelte/icons/folder';
@@ -100,7 +101,8 @@
 					<Card.Root variant="glass" class="p-3">
 						<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
 							<Folder class="text-muted-foreground size-4 shrink-0" />
-							<span class="truncate">{storage.name}</span>
+							<span class="min-w-0 flex-1 truncate">{storage.name}</span>
+							<ChevronRight class="text-muted-foreground/60 size-4 shrink-0" />
 						</Card.Content>
 					</Card.Root>
 				</a>
@@ -126,12 +128,14 @@
 			{#each recentEntries as { item, breadcrumb } (item.id)}
 				<a href="/items/{item.id}" class="block">
 					<Card.Root variant="glass" class="p-3">
-						<Card.Content class="flex flex-row items-center justify-between gap-2 p-0 text-sm">
-							<div class="flex min-w-0 flex-col">
+						<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
+							<Package class="text-muted-foreground size-4 shrink-0" />
+							<div class="flex min-w-0 flex-1 flex-col">
 								<span class="truncate font-medium">{item.name}</span>
 								<span class="text-muted-foreground truncate text-xs">{breadcrumb}</span>
 							</div>
 							<span class="text-muted-foreground shrink-0 text-xs">{formatDate(item.created_at)}</span>
+							<ChevronRight class="text-muted-foreground/60 size-4 shrink-0" />
 						</Card.Content>
 					</Card.Root>
 				</a>
