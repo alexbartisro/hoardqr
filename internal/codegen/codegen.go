@@ -9,7 +9,6 @@ import "crypto/rand"
 // PlainTextCodeAlphabet is Crockford's Base32 alphabet minus I, L, O, U —
 // chosen (architecture plan §4) to avoid characters that are visually
 // ambiguous on a hand-written sticky note or a plain text-only label.
-// Mirrors web/src/lib/api.ts's generatePlainTextCode() exactly.
 const PlainTextCodeAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 // PlainTextCode generates a new 6-character code from PlainTextCodeAlphabet,
