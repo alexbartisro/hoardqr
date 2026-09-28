@@ -5,7 +5,7 @@
 	// use it directly. Only the final "look this code up" call is mocked — camera
 	// scanning (html5-qrcode) and OCR (Tesseract.js) are real, client-side, right now.
 	import { getStorage, resolveStorage, searchSuggest } from '$lib/api';
-	import type { Item, SearchSuggestion } from '$lib/types';
+	import type { ScanItem, SearchSuggestion } from '$lib/types';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Tabs from '$lib/components/ui/tabs';
@@ -29,7 +29,7 @@
 	let suggestions = $state<SearchSuggestion[]>([]);
 	let searching = $state(false);
 
-	let pickerItems = $state<Item[] | null>(null); // ambiguous scan/resolve result (§6)
+	let pickerItems = $state<ScanItem[] | null>(null); // ambiguous scan/resolve result (§6)
 	let resolveError = $state<string | null>(null);
 
 	let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -87,7 +87,7 @@
 		}
 	}
 
-	async function choosePickerItem(item: Item) {
+	async function choosePickerItem(item: ScanItem) {
 		await resolveTo(item.storage_id);
 	}
 
@@ -184,10 +184,11 @@
 				{#each pickerItems as item (item.id)}
 					<button
 						type="button"
-						class="hover:bg-accent w-full rounded-md px-2 py-1.5 text-left text-sm"
+						class="hover:bg-accent w-full min-w-0 rounded-md px-2 py-1.5 text-left text-sm"
 						onclick={() => choosePickerItem(item)}
 					>
-						{item.name}
+						<span class="block truncate">{item.name}</span>
+						<span class="text-muted-foreground block truncate text-xs">{item.breadcrumb}</span>
 					</button>
 				{/each}
 			</div>

@@ -105,7 +105,12 @@ func (h *SearchHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(items) > 0 {
-		writeJSON(w, http.StatusOK, map[string]any{"kind": "item", "items": toItemDTOsFromScanRows(items)})
+		scanned, err := h.scanItems(r.Context(), items)
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"kind": "item", "items": scanned})
 		return
 	}
 
@@ -142,7 +147,12 @@ func (h *SearchHandler) ResolveStorage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(items) > 1 {
-		writeJSON(w, http.StatusOK, map[string]any{"kind": "items", "items": toItemDTOsFromScanRows(items)})
+		scanned, err := h.scanItems(r.Context(), items)
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"kind": "items", "items": scanned})
 		return
 	}
 
@@ -158,10 +168,25 @@ func (h *SearchHandler) ResolveStorage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"kind": "storage", "storage_id": storage.ID})
 }
 
-func toItemDTOsFromScanRows(rows []store.FindItemsByNormalizedCodeRow) []ItemDTO {
-	out := make([]ItemDTO, len(rows))
+// ScanItemDTO mirrors ScanItem in web/src/lib/types.ts: an item plus the
+// breadcrumb of the storage it lives in (Location prepended when assigned,
+// same text as a search suggestion's), so the ambiguous-code picker (§6) can
+// tell items that share a scanned code apart. Kept off ItemDTO itself —
+// breadcrumb isn't an item column, and the other item-returning endpoints
+// don't compute it.
+type ScanItemDTO struct {
+	ItemDTO
+	Breadcrumb string `json:"breadcrumb"`
+}
+
+func (h *SearchHandler) scanItems(ctx context.Context, rows []store.FindItemsByNormalizedCodeRow) ([]ScanItemDTO, error) {
+	out := make([]ScanItemDTO, len(rows))
 	for i, row := range rows {
-		out[i] = toItemDTOFromScanRow(row)
+		crumb, err := h.breadcrumbText(ctx, row.StorageID)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = ScanItemDTO{ItemDTO: toItemDTOFromScanRow(row), Breadcrumb: crumb}
 	}
-	return out
+	return out, nil
 }

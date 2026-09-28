@@ -9,7 +9,7 @@
 	// into the Storage Picker's Type tab does, and navigate to whichever it is.
 	import { goto } from '$app/navigation';
 	import { scan, searchSuggest } from '$lib/api';
-	import type { Item, SearchSuggestion } from '$lib/types';
+	import type { ScanItem, SearchSuggestion } from '$lib/types';
 	import QrScanner from '$lib/components/qr-scanner.svelte';
 	import LabelOcr from '$lib/components/label-ocr.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -21,7 +21,7 @@
 
 	// --- Scan code ---
 	let resolving = $state(false);
-	let pickerItems = $state<Item[] | null>(null);
+	let pickerItems = $state<ScanItem[] | null>(null);
 	let notFoundCode = $state<string | null>(null);
 	let scanError = $state<string | null>(null);
 
@@ -154,9 +154,10 @@
 						{#each pickerItems as item (item.id)}
 							<a
 								href="/items/{item.id}?scanned=1"
-								class="hover:bg-accent block rounded-md px-2 py-1.5 text-left text-sm"
+								class="hover:bg-accent block min-w-0 rounded-md px-2 py-1.5 text-left text-sm"
 							>
-								{item.name}
+								<span class="block truncate">{item.name}</span>
+								<span class="text-muted-foreground block truncate text-xs">{item.breadcrumb}</span>
 							</a>
 						{/each}
 						<Button variant="ghost" size="sm" class="self-start" onclick={resetCode}>Scan again</Button>

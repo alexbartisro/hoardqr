@@ -347,3 +347,95 @@ func TestSuggestStorageHitsGetDistinguishingBreadcrumbs(t *testing.T) {
 		t.Fatalf("expected both identically-named storages to appear with distinguishing breadcrumbs, got %+v", suggestions)
 	}
 }
+
+// TestScanAndResolveStorageItemsCarryBreadcrumb covers the ambiguous-code
+// picker (architecture plan §6): several items can share one scanned code,
+// and the picker needs each one's storage breadcrumb — with its Location
+// prepended when assigned — to tell them apart. Both /api/scan and
+// /api/resolve-storage return the same item list shape.
+func TestScanAndResolveStorageItemsCarryBreadcrumb(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	house, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "SCANCRUMB House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, house.ID) })
+
+	garage, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "SCANCRUMB Garage", QrToken: "SCANCRUMB-G", IsShared: true, LocationID: &house.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage garage: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, garage.ID) })
+
+	shelf, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "SCANCRUMB Shelf", QrToken: "SCANCRUMB-S", IsShared: true, ParentID: &garage.ID,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage shelf: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, shelf.ID) })
+
+	// A second, unrelated root storage with no Location.
+	attic, err := q.InsertStorage(ctx, store.InsertStorageParams{
+		Name: "SCANCRUMB Attic", QrToken: "SCANCRUMB-A", IsShared: true,
+	})
+	if err != nil {
+		t.Fatalf("InsertStorage attic: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, attic.ID) })
+
+	const sharedCode = "SCANCRUMBBC"
+	wantCrumb := map[int64]string{}
+	for _, in := range []struct {
+		storageID int64
+		crumb     string
+	}{
+		{shelf.ID, "SCANCRUMB House > SCANCRUMB Garage > SCANCRUMB Shelf"},
+		{attic.ID, "SCANCRUMB Attic"},
+	} {
+		item, err := q.InsertItem(ctx, store.InsertItemParams{
+			StorageID: in.storageID, IsShared: true, Name: "SCANCRUMB Widget", Quantity: 1,
+			QrToken: sharedCode, CustomFields: []byte("{}"),
+		})
+		if err != nil {
+			t.Fatalf("InsertItem: %v", err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, item.ID) })
+		wantCrumb[item.ID] = in.crumb
+	}
+
+	for _, tc := range []struct{ path, kind string }{
+		{"/api/scan?code=" + sharedCode, "item"},
+		{"/api/resolve-storage?code=" + sharedCode, "items"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		rec := httptest.NewRecorder()
+		NewRouter(pool, t.TempDir()).ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d: %s", tc.path, rec.Code, rec.Body.String())
+		}
+		var resp struct {
+			Kind  string `json:"kind"`
+			Items []struct {
+				ID         int64  `json:"id"`
+				Breadcrumb string `json:"breadcrumb"`
+			} `json:"items"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("%s: decoding response: %v", tc.path, err)
+		}
+		if resp.Kind != tc.kind || len(resp.Items) != 2 {
+			t.Fatalf("%s: expected kind %q with 2 items, got %q with %d", tc.path, tc.kind, resp.Kind, len(resp.Items))
+		}
+		for _, it := range resp.Items {
+			if want := wantCrumb[it.ID]; it.Breadcrumb != want {
+				t.Fatalf("%s: item %d breadcrumb = %q, want %q", tc.path, it.ID, it.Breadcrumb, want)
+			}
+		}
+	}
+}

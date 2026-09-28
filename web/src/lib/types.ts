@@ -78,14 +78,20 @@ export interface SearchSuggestion {
 	breadcrumb?: string;
 }
 
+/** An item as returned by /api/scan and /api/resolve-storage: the item plus
+ * its storage's breadcrumb text (Location prepended when assigned), so the
+ * ambiguous-code picker (§6) can tell items sharing a code apart. Not a
+ * schema column — kept off Item itself. */
+export type ScanItem = Item & { breadcrumb: string };
+
 export type ScanResult =
-	| { kind: 'item'; items: Item[] }
+	| { kind: 'item'; items: ScanItem[] }
 	| { kind: 'storage'; storage: Storage }
 	| { kind: 'none' };
 
 export type ResolveStorageResult =
 	| { kind: 'storage'; storage_id: number }
-	| { kind: 'items'; items: Item[] } // ambiguous: caller shows the short picker (§6/§7)
+	| { kind: 'items'; items: ScanItem[] } // ambiguous: caller shows the short picker (§6/§7)
 	| { kind: 'none' };
 
 export class ApiError extends Error {
