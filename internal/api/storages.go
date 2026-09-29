@@ -28,6 +28,7 @@ func NewStoragesHandler(pool *pgxpool.Pool) *StoragesHandler {
 
 func (h *StoragesHandler) Routes(r chi.Router) {
 	r.Get("/", h.list)
+	r.Get("/tree", h.tree)
 	r.Post("/", h.create)
 	r.Get("/{id}", h.get)
 	r.Get("/{id}/contents", h.contents)
@@ -595,4 +596,63 @@ func (h *StoragesHandler) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Default and ceiling for GET /api/storages/tree's depth (levels, 1 = roots
+// only). The dashboard diagram wants the first 3-5 levels; the cap keeps a
+// hand-typed ?depth=1000 from making the recursive CTE walk a huge tree.
+const (
+	defaultStorageTreeDepth = 4
+	maxStorageTreeDepth     = 5
+)
+
+// StorageTreeNodeDTO mirrors StorageTreeNode in web/src/lib/types.ts.
+// ChildCount is the TRUE number of direct children, so
+// len(Children) < ChildCount means the depth cap cut this branch. Children
+// is always a real array (never null), empty for a leaf or a cut branch.
+type StorageTreeNodeDTO struct {
+	ID           int64                 `json:"id"`
+	Name         string                `json:"name"`
+	LocationName *string               `json:"location_name"`
+	ChildCount   int32                 `json:"child_count"`
+	Children     []*StorageTreeNodeDTO `json:"children"`
+}
+
+// GET /api/storages/tree?depth=N — the storage forest (roots, each with
+// nested children) down to N levels, in one round trip, for the dashboard
+// tree diagram.
+func (h *StoragesHandler) tree(w http.ResponseWriter, r *http.Request) {
+	depth := defaultStorageTreeDepth
+	if raw := r.URL.Query().Get("depth"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			writeError(w, http.StatusBadRequest, "depth must be a positive integer")
+			return
+		}
+		depth = min(n, maxStorageTreeDepth)
+	}
+
+	rows, err := h.q.StorageTree(r.Context(), int32(depth))
+	if err != nil {
+		serverError(w, r, err)
+		return
+	}
+
+	// Rows are ordered depth then name, so a parent always appears before its
+	// children and siblings keep name order as they're appended.
+	byID := make(map[int64]*StorageTreeNodeDTO, len(rows))
+	roots := []*StorageTreeNodeDTO{}
+	for _, row := range rows {
+		node := &StorageTreeNodeDTO{
+			ID: row.ID, Name: row.Name, LocationName: row.LocationName,
+			ChildCount: row.ChildCount, Children: []*StorageTreeNodeDTO{},
+		}
+		byID[row.ID] = node
+		if row.ParentID == nil {
+			roots = append(roots, node)
+		} else if parent, ok := byID[*row.ParentID]; ok {
+			parent.Children = append(parent.Children, node)
+		}
+	}
+	writeJSON(w, http.StatusOK, roots)
 }

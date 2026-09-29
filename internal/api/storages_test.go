@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"hoardqr/internal/store"
 )
@@ -703,5 +704,120 @@ func TestStorageLocationCheckConstraintRejectsBothColumns(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "storages_location_only_on_root") {
 		t.Fatalf("expected the storages_location_only_on_root constraint to fire, got: %v", err)
+	}
+}
+
+// storageTreeNode mirrors StorageTreeNodeDTO for decoding in tests.
+type storageTreeNode struct {
+	ID           int64             `json:"id"`
+	Name         string            `json:"name"`
+	LocationName *string           `json:"location_name"`
+	ChildCount   int               `json:"child_count"`
+	Children     []storageTreeNode `json:"children"`
+}
+
+func getStorageTree(t *testing.T, pool *pgxpool.Pool, query string) []storageTreeNode {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	NewRouter(pool, t.TempDir()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/storages/tree"+query, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/storages/tree%s: expected 200, got %d: %s", query, rec.Code, rec.Body.String())
+	}
+	var roots []storageTreeNode
+	if err := json.NewDecoder(rec.Body).Decode(&roots); err != nil {
+		t.Fatalf("decoding tree: %v", err)
+	}
+	return roots
+}
+
+func findTreeRoot(roots []storageTreeNode, id int64) *storageTreeNode {
+	for i := range roots {
+		if roots[i].ID == id {
+			return &roots[i]
+		}
+	}
+	return nil
+}
+
+// TestStorageTreeDepthCapChildCountsAndOrder builds a 5-deep chain plus a
+// sibling and checks: the depth cap truncates (children omitted) while
+// child_count still reports the true number of direct children, siblings sort
+// by name, a root carries its Location's name, and every children array is a
+// real (possibly empty) JSON array rather than null.
+func TestStorageTreeDepthCapChildCountsAndOrder(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	house, err := q.InsertLocation(ctx, store.InsertLocationParams{Name: "TREETEST House", IsShared: true})
+	if err != nil {
+		t.Fatalf("InsertLocation: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, house.ID) })
+
+	mk := func(name string, parent *int64, loc *int64) store.Storage {
+		s, err := q.InsertStorage(ctx, store.InsertStorageParams{
+			Name: name, QrToken: "TREETEST-" + name, IsShared: true, ParentID: parent, LocationID: loc,
+		})
+		if err != nil {
+			t.Fatalf("InsertStorage %s: %v", name, err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, s.ID) })
+		return s
+	}
+	root := mk("R", nil, &house.ID)
+	// Inserted out of name order on purpose: expect B before Z.
+	z := mk("Z", &root.ID, nil)
+	b := mk("B", &root.ID, nil)
+	g := mk("G", &b.ID, nil)
+	gg := mk("GG", &g.ID, nil)
+	_ = mk("GGG", &gg.ID, nil)
+
+	// depth=3 -> R(1) > B(2) > G(3); G's child GG is cut but counted.
+	r := findTreeRoot(getStorageTree(t, pool, "?depth=3"), root.ID)
+	if r == nil {
+		t.Fatalf("root %d missing from tree", root.ID)
+	}
+	if r.LocationName == nil || *r.LocationName != "TREETEST House" {
+		t.Fatalf("expected the root to carry its Location name, got %v", r.LocationName)
+	}
+	if r.ChildCount != 2 || len(r.Children) != 2 || r.Children[0].ID != b.ID || r.Children[1].ID != z.ID {
+		t.Fatalf("expected children [B, Z] (sorted by name) with child_count 2, got %+v", r)
+	}
+	gn := r.Children[0].Children
+	if len(gn) != 1 || gn[0].ID != g.ID {
+		t.Fatalf("expected B's children to be [G], got %+v", gn)
+	}
+	if gn[0].ChildCount != 1 || gn[0].Children == nil || len(gn[0].Children) != 0 {
+		t.Fatalf("expected G truncated at the cap: child_count 1 but an empty (non-null) children array, got %+v", gn[0])
+	}
+	if r.Children[1].Children == nil || len(r.Children[1].Children) != 0 || r.Children[1].ChildCount != 0 {
+		t.Fatalf("expected leaf Z to have child_count 0 and an empty (non-null) children array, got %+v", r.Children[1])
+	}
+
+	// depth=5 reaches the bottom of the chain; depth above the cap is clamped to it.
+	for _, qs := range []string{"?depth=5", "?depth=99"} {
+		r5 := findTreeRoot(getStorageTree(t, pool, qs), root.ID)
+		if r5 == nil || len(r5.Children[0].Children) != 1 || len(r5.Children[0].Children[0].Children) != 1 ||
+			len(r5.Children[0].Children[0].Children[0].Children) != 1 {
+			t.Fatalf("%s: expected all 5 levels present, got %+v", qs, r5)
+		}
+	}
+	// A root has no parent, so it must not be duplicated as a nested child anywhere.
+	for _, n := range getStorageTree(t, pool, "") {
+		if n.ID == b.ID {
+			t.Fatalf("non-root storage B leaked into the top level")
+		}
+	}
+}
+
+func TestStorageTreeRejectsBadDepth(t *testing.T) {
+	pool := testPool(t)
+	for _, qs := range []string{"?depth=abc", "?depth=0", "?depth=-2"} {
+		rec := httptest.NewRecorder()
+		NewRouter(pool, t.TempDir()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/storages/tree"+qs, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: expected 400, got %d: %s", qs, rec.Code, rec.Body.String())
+		}
 	}
 }

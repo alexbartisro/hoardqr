@@ -153,3 +153,32 @@ SELECT EXISTS(
     WHERE TRANSLATE(UPPER(qr_token), 'OIL', '011') = TRANSLATE(UPPER(sqlc.arg(qr_token)::text), 'OIL', '011')
       AND id != sqlc.arg(id)::bigint
 );
+
+-- name: StorageTree :many
+-- The whole storage forest down to max_depth levels (1 = roots only), flat,
+-- for the dashboard's tree diagram — one round trip instead of one
+-- GetStoragesByParent per node. Rows come back depth-first-agnostic but
+-- ordered depth, then name, so siblings keep name order when the handler
+-- groups them under their parent. child_count is the node's TRUE number of
+-- direct children (not just those within max_depth), so the caller can tell
+-- "leaf" from "cut off by the depth cap". location_name is only ever set on
+-- a root (see GetStoragesByParent). Same `visited` cycle guard as
+-- StorageBreadcrumb, though a cyclic chain is unreachable from the
+-- parent_id IS NULL anchor anyway — it's cheap insurance, not the defense.
+WITH RECURSIVE tree AS (
+    SELECT s.id, s.parent_id, s.name, 1 AS depth, ARRAY[s.id] AS visited
+    FROM storages s
+    WHERE s.parent_id IS NULL
+    UNION ALL
+    SELECT c.id, c.parent_id, c.name, t.depth + 1, t.visited || c.id
+    FROM storages c
+    JOIN tree t ON c.parent_id = t.id
+    WHERE t.depth < sqlc.arg('max_depth')::int AND NOT (c.id = ANY(t.visited))
+)
+SELECT t.id, t.parent_id, t.name, t.depth::int AS depth,
+       (SELECT count(*) FROM storages k WHERE k.parent_id = t.id)::int AS child_count,
+       loc.name AS location_name
+FROM tree t
+JOIN storages s ON s.id = t.id
+LEFT JOIN locations loc ON loc.id = s.location_id
+ORDER BY t.depth, t.name, t.id;
