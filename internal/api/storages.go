@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -598,41 +599,46 @@ func (h *StoragesHandler) delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Default and ceiling for GET /api/storages/tree's depth (levels, 1 = roots
-// only). The dashboard diagram wants the first 3-5 levels; the cap keeps a
-// hand-typed ?depth=1000 from making the recursive CTE walk a huge tree.
-const (
-	defaultStorageTreeDepth = 4
-	maxStorageTreeDepth     = 5
-)
+// StorageTreeItemDTO is an item leaf under a StorageTreeNodeDTO — just
+// enough for the diagram to label and link it.
+type StorageTreeItemDTO struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Quantity int32  `json:"quantity"`
+}
 
 // StorageTreeNodeDTO mirrors StorageTreeNode in web/src/lib/types.ts.
-// ChildCount is the TRUE number of direct children, so
-// len(Children) < ChildCount means the depth cap cut this branch. Children
-// is always a real array (never null), empty for a leaf or a cut branch.
+// ChildCount is the TRUE number of direct child storages, so
+// len(Children) < ChildCount means an explicit ?depth= cut this branch (with
+// no depth param every level is returned, so they always match). Items are
+// the items stored directly in this storage. Children and Items are always
+// real arrays (never null), empty for none.
 type StorageTreeNodeDTO struct {
 	ID           int64                 `json:"id"`
 	Name         string                `json:"name"`
 	LocationName *string               `json:"location_name"`
 	ChildCount   int32                 `json:"child_count"`
 	Children     []*StorageTreeNodeDTO `json:"children"`
+	Items        []StorageTreeItemDTO  `json:"items"`
 }
 
-// GET /api/storages/tree?depth=N — the storage forest (roots, each with
-// nested children) down to N levels, in one round trip, for the dashboard
-// tree diagram.
+// GET /api/storages/tree[?depth=N] — the storage forest (roots, each with
+// nested child storages and the items stored directly in it) in one round
+// trip, for the dashboard tree diagram. Without depth every level is
+// returned (a home inventory's tree is small, and the diagram's job is to
+// show the whole thing); ?depth=N (>= 1) cuts it to N levels, 1 = roots only.
 func (h *StoragesHandler) tree(w http.ResponseWriter, r *http.Request) {
-	depth := defaultStorageTreeDepth
+	depth := int32(math.MaxInt32)
 	if raw := r.URL.Query().Get("depth"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 {
 			writeError(w, http.StatusBadRequest, "depth must be a positive integer")
 			return
 		}
-		depth = min(n, maxStorageTreeDepth)
+		depth = int32(min(n, math.MaxInt32))
 	}
 
-	rows, err := h.q.StorageTree(r.Context(), int32(depth))
+	rows, err := h.q.StorageTree(r.Context(), depth)
 	if err != nil {
 		serverError(w, r, err)
 		return
@@ -641,17 +647,32 @@ func (h *StoragesHandler) tree(w http.ResponseWriter, r *http.Request) {
 	// Rows are ordered depth then name, so a parent always appears before its
 	// children and siblings keep name order as they're appended.
 	byID := make(map[int64]*StorageTreeNodeDTO, len(rows))
+	ids := make([]int64, 0, len(rows))
 	roots := []*StorageTreeNodeDTO{}
 	for _, row := range rows {
 		node := &StorageTreeNodeDTO{
 			ID: row.ID, Name: row.Name, LocationName: row.LocationName,
-			ChildCount: row.ChildCount, Children: []*StorageTreeNodeDTO{},
+			ChildCount: row.ChildCount, Children: []*StorageTreeNodeDTO{}, Items: []StorageTreeItemDTO{},
 		}
 		byID[row.ID] = node
+		ids = append(ids, row.ID)
 		if row.ParentID == nil {
 			roots = append(roots, node)
 		} else if parent, ok := byID[*row.ParentID]; ok {
 			parent.Children = append(parent.Children, node)
+		}
+	}
+
+	if len(ids) > 0 {
+		items, err := h.q.ListItemsForStorageTree(r.Context(), ids)
+		if err != nil {
+			serverError(w, r, err)
+			return
+		}
+		for _, it := range items {
+			if node, ok := byID[it.StorageID]; ok {
+				node.Items = append(node.Items, StorageTreeItemDTO{ID: it.ID, Name: it.Name, Quantity: it.Quantity})
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, roots)

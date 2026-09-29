@@ -267,6 +267,48 @@ func (q *Queries) InsertStorage(ctx context.Context, arg InsertStorageParams) (S
 	return i, err
 }
 
+const listItemsForStorageTree = `-- name: ListItemsForStorageTree :many
+SELECT id, storage_id, name, quantity
+FROM items
+WHERE storage_id = ANY($1::bigint[])
+ORDER BY storage_id, name, id
+`
+
+type ListItemsForStorageTreeRow struct {
+	ID        int64
+	StorageID int64
+	Name      string
+	Quantity  int32
+}
+
+// The items stored directly in each of the given storages, for the
+// dashboard tree diagram's leaves (the storage ids come from StorageTree, so
+// only nodes actually returned get their items). Name order, id as the tiebreak.
+func (q *Queries) ListItemsForStorageTree(ctx context.Context, storageIds []int64) ([]ListItemsForStorageTreeRow, error) {
+	rows, err := q.db.Query(ctx, listItemsForStorageTree, storageIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListItemsForStorageTreeRow
+	for rows.Next() {
+		var i ListItemsForStorageTreeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StorageID,
+			&i.Name,
+			&i.Quantity,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const promoteItemsToParent = `-- name: PromoteItemsToParent :exec
 UPDATE items SET storage_id = $1::bigint
 WHERE storage_id = $2::bigint
@@ -499,7 +541,8 @@ type StorageTreeRow struct {
 	LocationName *string
 }
 
-// The whole storage forest down to max_depth levels (1 = roots only), flat,
+// The storage forest down to max_depth levels (1 = roots only; the handler
+// passes a huge value for "every level"), flat,
 // for the dashboard's tree diagram — one round trip instead of one
 // GetStoragesByParent per node. Rows come back depth-first-agnostic but
 // ordered depth, then name, so siblings keep name order when the handler

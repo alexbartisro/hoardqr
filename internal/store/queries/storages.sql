@@ -155,7 +155,8 @@ SELECT EXISTS(
 );
 
 -- name: StorageTree :many
--- The whole storage forest down to max_depth levels (1 = roots only), flat,
+-- The storage forest down to max_depth levels (1 = roots only; the handler
+-- passes a huge value for "every level"), flat,
 -- for the dashboard's tree diagram — one round trip instead of one
 -- GetStoragesByParent per node. Rows come back depth-first-agnostic but
 -- ordered depth, then name, so siblings keep name order when the handler
@@ -182,3 +183,12 @@ FROM tree t
 JOIN storages s ON s.id = t.id
 LEFT JOIN locations loc ON loc.id = s.location_id
 ORDER BY t.depth, t.name, t.id;
+
+-- name: ListItemsForStorageTree :many
+-- The items stored directly in each of the given storages, for the
+-- dashboard tree diagram's leaves (the storage ids come from StorageTree, so
+-- only nodes actually returned get their items). Name order, id as the tiebreak.
+SELECT id, storage_id, name, quantity
+FROM items
+WHERE storage_id = ANY(sqlc.arg('storage_ids')::bigint[])
+ORDER BY storage_id, name, id;

@@ -714,6 +714,11 @@ type storageTreeNode struct {
 	LocationName *string           `json:"location_name"`
 	ChildCount   int               `json:"child_count"`
 	Children     []storageTreeNode `json:"children"`
+	Items        []struct {
+		ID       int64  `json:"id"`
+		Name     string `json:"name"`
+		Quantity int32  `json:"quantity"`
+	} `json:"items"`
 }
 
 func getStorageTree(t *testing.T, pool *pgxpool.Pool, query string) []storageTreeNode {
@@ -802,24 +807,82 @@ func TestStorageTreeDepthCapChildCountsAndOrder(t *testing.T) {
 		t.Fatalf("depth=1: expected R with no children but child_count 2, got %+v", r1)
 	}
 
-	// depth=5 reaches level 5 (GGG) and no further; depth above the cap
-	// (99) must clamp to the same 5 — the 6th-level GGGG never appears.
-	for _, qs := range []string{"?depth=5", "?depth=99"} {
-		r5 := findTreeRoot(getStorageTree(t, pool, qs), root.ID)
-		if r5 == nil || len(r5.Children[0].Children) != 1 || len(r5.Children[0].Children[0].Children) != 1 ||
-			len(r5.Children[0].Children[0].Children[0].Children) != 1 {
-			t.Fatalf("%s: expected all 5 levels present, got %+v", qs, r5)
-		}
-		ggg := r5.Children[0].Children[0].Children[0].Children[0]
-		if len(ggg.Children) != 0 || ggg.ChildCount != 1 {
-			t.Fatalf("%s: expected level 5 (GGG) cut with child_count 1 and no children, got %+v", qs, ggg)
-		}
+	// depth=5 stops at level 5 (GGG, its child GGGG cut but counted); with NO
+	// depth param every level comes back, including the 6th.
+	r5 := findTreeRoot(getStorageTree(t, pool, "?depth=5"), root.ID)
+	ggg5 := r5.Children[0].Children[0].Children[0].Children[0]
+	if ggg5.Name != "GGG" || len(ggg5.Children) != 0 || ggg5.ChildCount != 1 {
+		t.Fatalf("depth=5: expected GGG cut with child_count 1 and no children, got %+v", ggg5)
+	}
+	rAll := findTreeRoot(getStorageTree(t, pool, ""), root.ID)
+	gggAll := rAll.Children[0].Children[0].Children[0].Children[0]
+	if len(gggAll.Children) != 1 || gggAll.Children[0].Name != "GGGG" || gggAll.Children[0].ChildCount != 0 {
+		t.Fatalf("no depth param: expected every level incl. the 6th (GGGG), got %+v", gggAll)
 	}
 	// A root has no parent, so it must not be duplicated as a nested child anywhere.
 	for _, n := range getStorageTree(t, pool, "") {
 		if n.ID == b.ID {
 			t.Fatalf("non-root storage B leaked into the top level")
 		}
+	}
+}
+
+// TestStorageTreeIncludesItems checks each node carries the items stored
+// directly in it (name order, non-null array when empty), and that items of
+// storages cut off by ?depth= are not attached anywhere.
+func TestStorageTreeIncludesItems(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := store.New(pool)
+
+	mk := func(name string, parent *int64) store.Storage {
+		s, err := q.InsertStorage(ctx, store.InsertStorageParams{
+			Name: name, QrToken: "TREEITEMS-" + name, IsShared: true, ParentID: parent,
+		})
+		if err != nil {
+			t.Fatalf("InsertStorage %s: %v", name, err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM storages WHERE id = $1`, s.ID) })
+		return s
+	}
+	addItem := func(storageID int64, name string, qty int32) store.Item {
+		it, err := q.InsertItem(ctx, store.InsertItemParams{
+			StorageID: storageID, IsShared: true, Name: name, Quantity: qty, QrToken: "TREEITEMS-" + name, CustomFields: []byte("{}"),
+		})
+		if err != nil {
+			t.Fatalf("InsertItem %s: %v", name, err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM items WHERE id = $1`, it.ID) })
+		return it
+	}
+	root := mk("TIR", nil)
+	child := mk("TIC", &root.ID)
+	// Out of name order on purpose: expect Anvil before Zip.
+	zip := addItem(root.ID, "Zip", 1)
+	anvil := addItem(root.ID, "Anvil", 3)
+	deep := addItem(child.ID, "Deep", 1)
+
+	r := findTreeRoot(getStorageTree(t, pool, ""), root.ID)
+	if r == nil || len(r.Items) != 2 || r.Items[0].ID != anvil.ID || r.Items[1].ID != zip.ID || r.Items[0].Quantity != 3 {
+		t.Fatalf("expected root items [Anvil x3, Zip] in name order, got %+v", r)
+	}
+	if len(r.Children) != 1 || len(r.Children[0].Items) != 1 || r.Children[0].Items[0].ID != deep.ID {
+		t.Fatalf("expected the child's own item under it, got %+v", r.Children)
+	}
+	if empty := r.Children[0].Children; empty == nil || len(empty) != 0 {
+		t.Fatalf("expected a leaf storage's children to be an empty array, got %v", empty)
+	}
+
+	// depth=1: the root's own items stay; the child (and its item) is cut.
+	r1 := findTreeRoot(getStorageTree(t, pool, "?depth=1"), root.ID)
+	if r1 == nil || len(r1.Items) != 2 || len(r1.Children) != 0 {
+		t.Fatalf("depth=1: expected the root's 2 items and no children, got %+v", r1)
+	}
+	// A storage with no items still gets an empty (non-null) array.
+	lone := mk("TIL", nil)
+	rl := findTreeRoot(getStorageTree(t, pool, ""), lone.ID)
+	if rl == nil || rl.Items == nil || len(rl.Items) != 0 {
+		t.Fatalf("expected an empty non-null items array for an empty storage, got %+v", rl)
 	}
 }
 
