@@ -5,6 +5,18 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="text-scale" content="scale" />
 		<meta name="theme-color" content="#0a0a0a" />
+		<!-- Applies the saved/auto theme before first paint so there's no flash of the
+		     wrong one. Keep in sync with $lib/theme.svelte.ts (same key, same rules). -->
+		<script>
+			(function () {
+				try {
+					var t = localStorage.getItem('theme');
+					var dark = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+					document.documentElement.classList.toggle('dark', dark);
+					document.querySelector('meta[name="theme-color"]').setAttribute('content', dark ? '#0a0a0a' : '#ffffff');
+				} catch (e) {}
+			})();
+		</script>
 		<title>HoardQR</title>
 		<link rel="manifest" href="%sveltekit.assets%/manifest.json" />
 		<link rel="apple-touch-icon" href="%sveltekit.assets%/icons/icon-192.png" />

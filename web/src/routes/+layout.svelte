@@ -6,7 +6,11 @@
 	import { getVersion } from '$lib/api';
 	import type { VersionInfo } from '$lib/types';
 	import { Button } from '$lib/components/ui/button';
+	import { theme } from '$lib/theme.svelte';
 	import ScanLine from '@lucide/svelte/icons/scan-line';
+	import Sun from '@lucide/svelte/icons/sun';
+	import Moon from '@lucide/svelte/icons/moon';
+	import SunMoon from '@lucide/svelte/icons/sun-moon';
 	import House from '@lucide/svelte/icons/house';
 	import Box from '@lucide/svelte/icons/box';
 	import Wrench from '@lucide/svelte/icons/wrench';
@@ -25,12 +29,14 @@
 	);
 
 	onMount(() => {
+		const stopThemeSync = theme.init();
 		getVersion().then((v) => (versionInfo = v)).catch(() => {});
 		if ('serviceWorker' in navigator) {
 			// Registration rejects outside a secure context (plain http:// on a LAN
 			// IP, e.g.) — expected there, not an error worth surfacing to the user.
 			navigator.serviceWorker.register('/service-worker.js').catch(() => {});
 		}
+		return stopThemeSync;
 	});
 
 	// Bottom tab bar's own primary nav — the header never grew one (see the
@@ -61,6 +67,16 @@
 	>
 		<a href="/" class="shrink-0 text-lg font-semibold">HoardQR</a>
 		<SearchBar />
+		<Button
+			variant="ghost"
+			size="icon"
+			class="shrink-0"
+			aria-label="Theme: {theme.mode === 'auto' ? 'automatic, follows your device' : theme.mode}. Tap to change."
+			title="Theme: {theme.mode}"
+			onclick={() => theme.cycle()}
+		>
+			{#if theme.mode === 'light'}<Sun />{:else if theme.mode === 'dark'}<Moon />{:else}<SunMoon />{/if}
+		</Button>
 		<Button href="/scan" variant="ghost" size="icon" class="shrink-0" aria-label="Scan a code">
 			<ScanLine />
 		</Button>
