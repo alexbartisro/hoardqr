@@ -213,9 +213,9 @@
 			<Card.Root variant="glass" class="border-primary/50 p-4">
 				<Card.Content class="flex flex-col gap-1 p-0">
 					<p class="text-muted-foreground text-xs font-medium tracking-wide uppercase">This goes in</p>
-					<p class="text-2xl font-semibold">{breadcrumb.at(-1)?.name}</p>
+					<p class="text-2xl font-semibold break-words">{breadcrumb.at(-1)?.name}</p>
 					{#if ancestorNames.length > 0}
-						<p class="text-muted-foreground text-sm">{ancestorNames.join(' › ')}</p>
+						<p class="text-muted-foreground text-sm break-words">{ancestorNames.join(' › ')}</p>
 					{/if}
 					<a
 						href="/storages/{item.storage_id}"
@@ -228,11 +228,11 @@
 		{:else}
 			<div class="flex flex-wrap items-center gap-1 text-sm">
 				{#if location}
-					<a href="/locations" class="hover:underline">{location.name}</a>
+					<a href="/locations" class="min-w-0 break-words hover:underline">{location.name}</a>
 					<span class="text-muted-foreground">›</span>
 				{/if}
 				{#each breadcrumb as b, i (b.id)}
-					<a href="/storages/{b.id}" class="hover:underline">{b.name}</a>
+					<a href="/storages/{b.id}" class="min-w-0 break-words hover:underline">{b.name}</a>
 					{#if i < breadcrumb.length - 1}<span class="text-muted-foreground">›</span>{/if}
 				{/each}
 			</div>

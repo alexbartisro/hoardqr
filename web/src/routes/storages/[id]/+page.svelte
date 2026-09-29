@@ -262,11 +262,11 @@
 		{#if ancestors.length > 0 || location}
 			<div class="flex flex-wrap items-center gap-1 text-sm">
 				{#if location}
-					<a href="/locations" class="hover:underline">{location.name}</a>
+					<a href="/locations" class="min-w-0 break-words hover:underline">{location.name}</a>
 					{#if ancestors.length > 0}<span class="text-muted-foreground">›</span>{/if}
 				{/if}
 				{#each ancestors as b, i (b.id)}
-					<a href="/storages/{b.id}" class="hover:underline">{b.name}</a>
+					<a href="/storages/{b.id}" class="min-w-0 break-words hover:underline">{b.name}</a>
 					{#if i < ancestors.length - 1}<span class="text-muted-foreground">›</span>{/if}
 				{/each}
 			</div>
