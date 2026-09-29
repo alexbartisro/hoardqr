@@ -3,6 +3,7 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Wrench from '@lucide/svelte/icons/wrench';
 	import Box from '@lucide/svelte/icons/box';
+	import StorageTree from '$lib/components/storage-tree.svelte';
 	import { getRecentItems, getStorages } from '$lib/api';
 	import type { Item, Storage } from '$lib/types';
 
@@ -107,6 +108,11 @@
 				</a>
 			{/each}
 		{/if}
+	</div>
+
+	<div class="mt-2 flex flex-col gap-2">
+		<h2 class="text-muted-foreground text-sm font-medium">Storage map</h2>
+		<StorageTree />
 	</div>
 
 	<div class="mt-2 flex flex-col gap-2">

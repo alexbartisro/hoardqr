@@ -11,7 +11,7 @@
 // server's port so `npm run dev` works against a real local backend too.
 
 import { USERS } from './fixtures';
-import { ApiError, type Breadcrumb, type Item, type Location, type Storage, type ResolveStorageResult, type ScanResult, type SearchSuggestion, type Tag, type User, type VersionInfo } from './types';
+import { ApiError, type Breadcrumb, type Item, type Location, type Storage, type ResolveStorageResult, type ScanResult, type SearchSuggestion, type Tag, type StorageTreeNode, type User, type VersionInfo } from './types';
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 	// A FormData body (photo upload) must NOT get a Content-Type set here —
@@ -49,6 +49,11 @@ function queryString(params: Record<string, string | number | boolean | undefine
 // --- GET /api/storages?parent_id= ---
 export async function getStorages(parentId?: number | null): Promise<Storage[]> {
 	return apiFetch(`/api/storages${queryString({ parent_id: parentId })}`);
+}
+
+// --- GET /api/storages/tree?depth= (dashboard tree diagram) ---
+export async function getStorageTree(depth?: number): Promise<StorageTreeNode[]> {
+	return apiFetch(`/api/storages/tree${queryString({ depth })}`);
 }
 
 // --- GET /api/storages/:id ---

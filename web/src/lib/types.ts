@@ -94,6 +94,18 @@ export type ResolveStorageResult =
 	| { kind: 'items'; items: ScanItem[] } // ambiguous: caller shows the short picker (§6/§7)
 	| { kind: 'none' };
 
+/** One node of GET /api/storages/tree (the dashboard tree diagram). child_count
+ * is the TRUE number of direct children, so children.length < child_count
+ * means the depth cap cut this branch. location_name is only ever set on a
+ * root storage. */
+export interface StorageTreeNode {
+	id: number;
+	name: string;
+	location_name: string | null;
+	child_count: number;
+	children: StorageTreeNode[];
+}
+
 /** GET /api/version — the footer label. commit is "" for an unstamped local build. */
 export interface VersionInfo {
 	version: string;
