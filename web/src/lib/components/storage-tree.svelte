@@ -39,6 +39,7 @@
 	>
 		<Box class="text-muted-foreground size-4 shrink-0" />
 		<span class="min-w-0">
+			<span class="sr-only">Storage: </span>
 			<span class="block truncate">{node.name}</span>
 			{#if node.location_name}
 				<span class="text-muted-foreground block truncate text-xs">{node.location_name}</span>
@@ -53,8 +54,9 @@
 		class="text-muted-foreground hover:bg-accent hover:text-foreground flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-1 text-sm"
 	>
 		<Wrench class="size-3.5 shrink-0" />
+		<span class="sr-only">Item: </span>
 		<span class="min-w-0 truncate">{item.name}</span>
-		{#if item.quantity > 1}<span class="shrink-0 text-xs">×{item.quantity}</span>{/if}
+		{#if item.quantity > 1}<span class="shrink-0 text-xs"><span class="sr-only">quantity </span>×{item.quantity}</span>{/if}
 	</a>
 {/snippet}
 
@@ -64,12 +66,12 @@
      the <li> (pt-1.5), not a flex gap, so each spine covers the whole gap
      and the line is continuous. A node's child storages and its items share
      ONE list (storages first), so the spine's `last:` handling works across
-     both. Tick offsets: 22px = 6px padding + half a single-line chip
-     (16px); 20px = 6px + half an item row (14px). Roots (`nested` false)
+     both. Tick offsets: 23px = 6px padding + half a single-line chip
+     (34px incl. its 1px borders, so 17px); 20px = 6px + half an item row (14px). Roots (`nested` false)
      get no lines. -->
 {#snippet branch(node: StorageTreeNode | null, nodes: StorageTreeNode[], nested: boolean)}
 	{@const chipLine =
-		'pl-4 pt-1.5 before:absolute before:top-0 before:left-0 before:h-full before:border-l before:border-border last:before:h-[22px] after:absolute after:top-[22px] after:left-0 after:w-4 after:border-t after:border-border'}
+		'pl-4 pt-1.5 before:absolute before:top-0 before:left-0 before:h-full before:border-l before:border-border last:before:h-[23px] after:absolute after:top-[23px] after:left-0 after:w-4 after:border-t after:border-border'}
 	{@const itemLine =
 		'pl-4 pt-1.5 before:absolute before:top-0 before:left-0 before:h-full before:border-l before:border-border last:before:h-[20px] after:absolute after:top-[20px] after:left-0 after:w-4 after:border-t after:border-border'}
 	<ul class="flex flex-col {nested ? 'ml-3' : 'gap-1.5'}">
@@ -103,7 +105,7 @@
 		{:else}
 			<Card.Root variant="glass" class="p-3">
 				<Card.Content class="p-0">
-					<nav aria-label="Storage map" class="max-h-[60vh] overflow-y-auto overscroll-contain md:max-h-[75vh]">
+					<nav aria-label="Storage map" class="max-h-[60vh] overflow-y-auto md:max-h-[75vh] md:overscroll-contain">
 						{@render branch(null, roots, false)}
 					</nav>
 				</Card.Content>

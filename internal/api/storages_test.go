@@ -777,7 +777,8 @@ func TestStorageTreeDepthCapChildCountsAndOrder(t *testing.T) {
 	g := mk("G", &b.ID, nil)
 	gg := mk("GG", &g.ID, nil)
 	ggg := mk("GGG", &gg.ID, nil)
-	_ = mk("GGGG", &ggg.ID, nil) // 6th level: must never appear, even at depth=99
+	gggg := mk("GGGG", &ggg.ID, nil)
+	_ = mk("GGGGG", &gggg.ID, nil) // 7th level: the default must not stop at 5 or 6
 
 	// depth=3 -> R(1) > B(2) > G(3); G's child GG is cut but counted.
 	r := findTreeRoot(getStorageTree(t, pool, "?depth=3"), root.ID)
@@ -810,14 +811,27 @@ func TestStorageTreeDepthCapChildCountsAndOrder(t *testing.T) {
 	// depth=5 stops at level 5 (GGG, its child GGGG cut but counted); with NO
 	// depth param every level comes back, including the 6th.
 	r5 := findTreeRoot(getStorageTree(t, pool, "?depth=5"), root.ID)
+	if r5 == nil {
+		t.Fatalf("depth=5: root %d missing from tree", root.ID)
+	}
 	ggg5 := r5.Children[0].Children[0].Children[0].Children[0]
 	if ggg5.Name != "GGG" || len(ggg5.Children) != 0 || ggg5.ChildCount != 1 {
 		t.Fatalf("depth=5: expected GGG cut with child_count 1 and no children, got %+v", ggg5)
 	}
-	rAll := findTreeRoot(getStorageTree(t, pool, ""), root.ID)
-	gggAll := rAll.Children[0].Children[0].Children[0].Children[0]
-	if len(gggAll.Children) != 1 || gggAll.Children[0].Name != "GGGG" || gggAll.Children[0].ChildCount != 0 {
-		t.Fatalf("no depth param: expected every level incl. the 6th (GGGG), got %+v", gggAll)
+	// No depth param, and an absurdly large one (past int32), both return
+	// every level — all 7 of them.
+	for _, qs := range []string{"", "?depth=3000000000"} {
+		rAll := findTreeRoot(getStorageTree(t, pool, qs), root.ID)
+		if rAll == nil {
+			t.Fatalf("%q: root %d missing from tree", qs, root.ID)
+		}
+		n, levels := &rAll.Children[0], 2 // R(1) > B(2)
+		for len(n.Children) > 0 {
+			n, levels = &n.Children[0], levels+1
+		}
+		if n.Name != "GGGGG" || levels != 7 {
+			t.Fatalf("%q: expected the chain to reach GGGGG at level 7, ended at %s (level %d)", qs, n.Name, levels)
+		}
 	}
 	// A root has no parent, so it must not be duplicated as a nested child anywhere.
 	for _, n := range getStorageTree(t, pool, "") {
