@@ -94,6 +94,12 @@ export type ResolveStorageResult =
 	| { kind: 'items'; items: ScanItem[] } // ambiguous: caller shows the short picker (§6/§7)
 	| { kind: 'none' };
 
+/** GET /api/version — the footer label. commit is "" for an unstamped local build. */
+export interface VersionInfo {
+	version: string;
+	commit: string;
+}
+
 export class ApiError extends Error {
 	status: number;
 	constructor(status: number, message: string) {

@@ -4,10 +4,12 @@ COPY web/ .
 RUN npm ci && npm run build              # adapter-static output → build/
 
 FROM golang:1.25-alpine AS backend
+ARG GIT_SHA=
 WORKDIR /app
 COPY . .
 COPY --from=frontend /app/web/build ./web/build
-RUN go build -o hoardqr ./cmd/hoardqr    # web/build is go:embed'd in (web/embed.go)
+# web/build is go:embed'd in (web/embed.go); GIT_SHA is stamped in for the footer's version label
+RUN go build -ldflags "-X hoardqr/internal/version.Commit=${GIT_SHA}" -o hoardqr ./cmd/hoardqr
 
 FROM alpine:3.20
 COPY --from=backend /app/hoardqr /app/hoardqr

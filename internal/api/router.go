@@ -26,6 +26,7 @@ func NewRouter(pool *pgxpool.Pool, uploadDir string) chi.Router {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/healthz", HealthzHandler(pool))
+	r.Get("/api/version", VersionHandler)
 
 	r.Route("/api/storages", NewStoragesHandler(pool).Routes)
 	r.Route("/api/locations", NewLocationsHandler(pool).Routes)

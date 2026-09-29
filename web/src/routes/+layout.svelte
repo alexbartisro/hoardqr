@@ -3,6 +3,8 @@
 	import { page } from '$app/state';
 	import './layout.css';
 	import SearchBar from '$lib/components/search-bar.svelte';
+	import { getVersion } from '$lib/api';
+	import type { VersionInfo } from '$lib/types';
 	import { Button } from '$lib/components/ui/button';
 	import ScanLine from '@lucide/svelte/icons/scan-line';
 	import House from '@lucide/svelte/icons/house';
@@ -11,7 +13,19 @@
 
 	let { children } = $props();
 
+	// Footer label. A failed fetch just leaves the footer showing nothing
+	// version-specific — not worth surfacing to the user.
+	let versionInfo = $state<VersionInfo | null>(null);
+	// Built as one string (not template {#if}s) — Svelte trims the whitespace
+	// around block tags, which glued "HoardQR" and "v0.0.2" together.
+	const versionLabel = $derived(
+		versionInfo
+			? `HoardQR v${versionInfo.version}${versionInfo.commit ? ` · ${versionInfo.commit}` : ''}`
+			: 'HoardQR'
+	);
+
 	onMount(() => {
+		getVersion().then((v) => (versionInfo = v)).catch(() => {});
 		if ('serviceWorker' in navigator) {
 			// Registration rejects outside a secure context (plain http:// on a LAN
 			// IP, e.g.) — expected there, not an error worth surfacing to the user.
@@ -54,6 +68,9 @@
 	<main class="mx-auto w-full max-w-lg flex-1 p-4 pb-20 print:max-w-none print:p-0">
 		{@render children()}
 	</main>
+	<footer class="text-muted-foreground px-4 pb-4 text-center text-xs print:hidden">
+		{versionLabel}
+	</footer>
 	<nav
 		class="glass-panel glass-panel-shadow-up sticky bottom-0 z-10 flex rounded-none border-x-0 border-b-0 print:hidden"
 		style="padding-bottom: env(safe-area-inset-bottom)"

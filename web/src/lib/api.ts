@@ -11,7 +11,7 @@
 // server's port so `npm run dev` works against a real local backend too.
 
 import { USERS } from './fixtures';
-import { ApiError, type Breadcrumb, type Item, type Location, type Storage, type ResolveStorageResult, type ScanResult, type SearchSuggestion, type Tag, type User } from './types';
+import { ApiError, type Breadcrumb, type Item, type Location, type Storage, type ResolveStorageResult, type ScanResult, type SearchSuggestion, type Tag, type User, type VersionInfo } from './types';
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 	// A FormData body (photo upload) must NOT get a Content-Type set here —
@@ -263,4 +263,9 @@ export async function healthz(): Promise<{ ok: true }> {
 	const res = await fetch('/healthz');
 	if (!res.ok) throw new ApiError(res.status, res.statusText);
 	return { ok: true };
+}
+
+// --- GET /api/version ---
+export async function getVersion(): Promise<VersionInfo> {
+	return apiFetch('/api/version');
 }
