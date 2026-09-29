@@ -1,20 +1,18 @@
 <script lang="ts">
 	import * as Card from '$lib/components/ui/card';
 	import Box from '@lucide/svelte/icons/box';
+	import Wrench from '@lucide/svelte/icons/wrench';
 	import { getStorageTree } from '$lib/api';
-	import type { StorageTreeNode } from '$lib/types';
+	import type { StorageTreeItem, StorageTreeNode } from '$lib/types';
 
-	// Dashboard tree diagram: the first few levels of the storage hierarchy,
-	// drawn as a vertical indented tree (a phone is ~375px wide — a
-	// left-to-right layout runs out of room by level 3). One glass panel holds
-	// the whole thing; the nodes inside are plain bordered chips, not one
-	// backdrop-blurred Card each, since dozens of stacked blur layers are
-	// costly on phones. Every node links to its storage page.
-
-	// A node with more children than this shows the first few plus a
-	// "+N more" link to its own page, so one crowded shelf can't make the
-	// dashboard endlessly tall.
-	const MAX_CHILDREN_SHOWN = 8;
+	// Dashboard tree diagram: the whole storage hierarchy, every level down to
+	// the bottom, with each storage's items as leaves. Drawn as a vertical
+	// indented tree (a phone is ~375px wide — a left-to-right layout runs out
+	// of room by level 3). One glass panel holds it, scrolling internally so a
+	// big inventory can't make the dashboard endlessly tall; the nodes inside
+	// are plain bordered chips, not one backdrop-blurred Card each, since
+	// hundreds of stacked blur layers are costly on phones. Every storage and
+	// item links to its own page.
 
 	let roots = $state<StorageTreeNode[]>([]);
 	let loading = $state(true);
@@ -49,47 +47,46 @@
 	</a>
 {/snippet}
 
+{#snippet itemRow(item: StorageTreeItem)}
+	<a
+		href="/items/{item.id}"
+		class="text-muted-foreground hover:bg-accent hover:text-foreground flex min-w-0 max-w-full items-center gap-2 rounded-md px-2 py-1 text-sm"
+	>
+		<Wrench class="size-3.5 shrink-0" />
+		<span class="min-w-0 truncate">{item.name}</span>
+		{#if item.quantity > 1}<span class="shrink-0 text-xs">×{item.quantity}</span>{/if}
+	</a>
+{/snippet}
+
 <!-- Connector lines are per-<li> pseudo-elements: ::before is the vertical
      spine (full height, but only down to the tick for the last sibling) and
-     ::after the horizontal tick into the chip. Sibling spacing is padding
-     on the <li> (pt-1.5), not a flex gap, so each spine covers the whole
-     gap and the line is continuous. `nested` is false for the roots, which
-     get no lines. `parent` is the node these are the children of
-     (undefined for the roots): when it has children not shown — cut by the
-     API's depth cap or by MAX_CHILDREN_SHOWN — a final "+N more" <li> joins
-     the same list, so the last real sibling's spine continues into it and
-     the "+N more" row is the one that ends the line. Tick offsets: 22px =
-     6px padding + half a single-line chip (16px); 14px = 6px + half a
-     text-xs link (8px). -->
-{#snippet branch(nodes: StorageTreeNode[], nested: boolean, parent?: StorageTreeNode)}
+     ::after the horizontal tick into the row. Sibling spacing is padding on
+     the <li> (pt-1.5), not a flex gap, so each spine covers the whole gap
+     and the line is continuous. A node's child storages and its items share
+     ONE list (storages first), so the spine's `last:` handling works across
+     both. Tick offsets: 22px = 6px padding + half a single-line chip
+     (16px); 20px = 6px + half an item row (14px). Roots (`nested` false)
+     get no lines. -->
+{#snippet branch(node: StorageTreeNode | null, nodes: StorageTreeNode[], nested: boolean)}
 	{@const chipLine =
 		'pl-4 pt-1.5 before:absolute before:top-0 before:left-0 before:h-full before:border-l before:border-border last:before:h-[22px] after:absolute after:top-[22px] after:left-0 after:w-4 after:border-t after:border-border'}
-	{@const moreLine =
-		'pl-4 pt-1.5 before:absolute before:top-0 before:left-0 before:h-full before:border-l before:border-border last:before:h-[14px] after:absolute after:top-[14px] after:left-0 after:w-4 after:border-t after:border-border'}
+	{@const itemLine =
+		'pl-4 pt-1.5 before:absolute before:top-0 before:left-0 before:h-full before:border-l before:border-border last:before:h-[20px] after:absolute after:top-[20px] after:left-0 after:w-4 after:border-t after:border-border'}
 	<ul class="flex flex-col {nested ? 'ml-3' : 'gap-1.5'}">
-		{#each nodes.slice(0, MAX_CHILDREN_SHOWN) as node (node.id)}
+		{#each nodes as child (child.id)}
 			<li class="relative min-w-0 {nested ? chipLine : ''}">
-				{@render chip(node)}
-				{#if node.children.length > 0 || node.child_count > 0}
-					{@render branch(node.children, true, node)}
+				{@render chip(child)}
+				{#if child.children.length > 0 || child.items.length > 0}
+					{@render branch(child, child.children, true)}
 				{/if}
 			</li>
 		{/each}
-		{#if parent}
-			{@const hidden = parent.child_count - Math.min(parent.children.length, MAX_CHILDREN_SHOWN)}
-			{#if hidden > 0}
-				<li class="relative min-w-0 {moreLine}">
-					<a href="/storages/{parent.id}" class="text-primary text-xs hover:underline">+{hidden} more →</a>
+		{#if node}
+			{#each node.items as item (item.id)}
+				<li class="relative min-w-0 {itemLine}">
+					{@render itemRow(item)}
 				</li>
-			{/if}
-		{:else if nodes.length > MAX_CHILDREN_SHOWN}
-			<!-- More root storages than fit: the roots list is complete (the API
-			     returns every root), so the rest live on the full Storage page. -->
-			<li class="min-w-0">
-				<a href="/storages" class="text-primary text-xs hover:underline">
-					+{nodes.length - MAX_CHILDREN_SHOWN} more →
-				</a>
-			</li>
+			{/each}
 		{/if}
 	</ul>
 {/snippet}
@@ -106,8 +103,8 @@
 		{:else}
 			<Card.Root variant="glass" class="p-3">
 				<Card.Content class="p-0">
-					<nav aria-label="Storage map">
-						{@render branch(roots, false)}
+					<nav aria-label="Storage map" class="max-h-[60vh] overflow-y-auto overscroll-contain md:max-h-[75vh]">
+						{@render branch(null, roots, false)}
 					</nav>
 				</Card.Content>
 			</Card.Root>

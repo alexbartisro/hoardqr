@@ -81,7 +81,13 @@
 			<ScanLine />
 		</Button>
 	</header>
-	<main class="mx-auto w-full max-w-lg flex-1 p-4 pb-20 print:max-w-none print:p-0">
+	<!-- The dashboard (/) widens at md+ so its Storage list and Storage map can sit
+	     side by side; every other page stays a single narrow column. -->
+	<main
+		class="mx-auto w-full max-w-lg flex-1 p-4 pb-20 print:max-w-none print:p-0 {page.url.pathname === '/'
+			? 'md:max-w-4xl'
+			: ''}"
+	>
 		{@render children()}
 	</main>
 	<footer class="text-muted-foreground px-4 pb-4 text-center text-xs print:hidden">

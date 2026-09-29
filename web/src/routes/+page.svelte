@@ -81,36 +81,43 @@
 		</a>
 	</div>
 
-	<div class="mt-2 flex flex-col gap-2">
-		<div class="flex items-center justify-between">
-			<h2 class="text-muted-foreground text-sm font-medium">Storage</h2>
-			{#if roots.length > STORAGE_PREVIEW_SIZE}
-				<a href="/storages" class="text-primary text-xs hover:underline">See all →</a>
+	<!-- Flat list and tree side by side once there's room (md+, where the layout
+	     also widens this page — see +layout.svelte), stacked on a phone.
+	     grid-cols-1 (= minmax(0, 1fr)), not the implicit `auto` column: an auto
+	     column grows to the widest nowrap row in a deep tree and stretches the
+	     whole page past the viewport. -->
+	<div class="grid grid-cols-1 gap-4 md:grid-cols-2 md:items-start md:gap-6">
+		<div class="mt-2 flex flex-col gap-2">
+			<div class="flex items-center justify-between">
+				<h2 class="text-muted-foreground text-sm font-medium">Storage</h2>
+				{#if roots.length > STORAGE_PREVIEW_SIZE}
+					<a href="/storages" class="text-primary text-xs hover:underline">See all →</a>
+				{/if}
+			</div>
+
+			{#if rootsLoading}
+				<p class="text-muted-foreground text-sm">Loading…</p>
+			{:else if rootsError}
+				<p class="text-destructive text-sm">{rootsError}</p>
+			{:else if roots.length === 0}
+				<p class="text-muted-foreground text-sm">No storage yet.</p>
+			{:else}
+				{#each roots.slice(0, STORAGE_PREVIEW_SIZE) as storage (storage.id)}
+					<a href="/storages/{storage.id}" class="block">
+						<Card.Root variant="glass" class="p-3">
+							<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
+								<Box class="text-muted-foreground size-4 shrink-0" />
+								<span class="min-w-0 flex-1 truncate">{storage.name}</span>
+								<ChevronRight class="text-muted-foreground/60 size-4 shrink-0" />
+							</Card.Content>
+						</Card.Root>
+					</a>
+				{/each}
 			{/if}
 		</div>
 
-		{#if rootsLoading}
-			<p class="text-muted-foreground text-sm">Loading…</p>
-		{:else if rootsError}
-			<p class="text-destructive text-sm">{rootsError}</p>
-		{:else if roots.length === 0}
-			<p class="text-muted-foreground text-sm">No storage yet.</p>
-		{:else}
-			{#each roots.slice(0, STORAGE_PREVIEW_SIZE) as storage (storage.id)}
-				<a href="/storages/{storage.id}" class="block">
-					<Card.Root variant="glass" class="p-3">
-						<Card.Content class="flex flex-row items-center gap-2 p-0 text-sm">
-							<Box class="text-muted-foreground size-4 shrink-0" />
-							<span class="min-w-0 flex-1 truncate">{storage.name}</span>
-							<ChevronRight class="text-muted-foreground/60 size-4 shrink-0" />
-						</Card.Content>
-					</Card.Root>
-				</a>
-			{/each}
-		{/if}
+		<StorageTree />
 	</div>
-
-	<StorageTree />
 
 	<div class="mt-2 flex flex-col gap-2">
 		<div class="flex items-center justify-between">
