@@ -110,10 +110,7 @@
 		{/if}
 	</div>
 
-	<div class="mt-2 flex flex-col gap-2">
-		<h2 class="text-muted-foreground text-sm font-medium">Storage map</h2>
-		<StorageTree />
-	</div>
+	<StorageTree />
 
 	<div class="mt-2 flex flex-col gap-2">
 		<div class="flex items-center justify-between">

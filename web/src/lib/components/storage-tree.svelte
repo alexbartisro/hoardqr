@@ -51,18 +51,24 @@
 
 <!-- Connector lines are per-<li> pseudo-elements: ::before is the vertical
      spine (full height, but only down to the tick for the last sibling) and
-     ::after the horizontal tick into the chip. `nested` is false for the
-     roots, which get no lines. `parent` is the node these are the children
-     of (undefined for the roots): when it has children not shown — cut by
-     the API's depth cap or by MAX_CHILDREN_SHOWN — a final "+N more" <li>
-     joins the same list, so the last real sibling's spine continues into it
-     and the "+N more" row is the one that ends the line. -->
+     ::after the horizontal tick into the chip. Sibling spacing is padding
+     on the <li> (pt-1.5), not a flex gap, so each spine covers the whole
+     gap and the line is continuous. `nested` is false for the roots, which
+     get no lines. `parent` is the node these are the children of
+     (undefined for the roots): when it has children not shown — cut by the
+     API's depth cap or by MAX_CHILDREN_SHOWN — a final "+N more" <li> joins
+     the same list, so the last real sibling's spine continues into it and
+     the "+N more" row is the one that ends the line. Tick offsets: 22px =
+     6px padding + half a single-line chip (16px); 14px = 6px + half a
+     text-xs link (8px). -->
 {#snippet branch(nodes: StorageTreeNode[], nested: boolean, parent?: StorageTreeNode)}
-	{@const lineClass =
-		'pl-4 before:absolute before:top-0 before:left-0 before:h-full before:border-l before:border-border last:before:h-4 after:absolute after:top-4 after:left-0 after:w-4 after:border-t after:border-border'}
-	<ul class="flex flex-col gap-1.5 {nested ? 'mt-1.5 ml-3' : ''}">
+	{@const chipLine =
+		'pl-4 pt-1.5 before:absolute before:top-0 before:left-0 before:h-full before:border-l before:border-border last:before:h-[22px] after:absolute after:top-[22px] after:left-0 after:w-4 after:border-t after:border-border'}
+	{@const moreLine =
+		'pl-4 pt-1.5 before:absolute before:top-0 before:left-0 before:h-full before:border-l before:border-border last:before:h-[14px] after:absolute after:top-[14px] after:left-0 after:w-4 after:border-t after:border-border'}
+	<ul class="flex flex-col {nested ? 'ml-3' : 'gap-1.5'}">
 		{#each nodes.slice(0, MAX_CHILDREN_SHOWN) as node (node.id)}
-			<li class="relative min-w-0 {nested ? lineClass : ''}">
+			<li class="relative min-w-0 {nested ? chipLine : ''}">
 				{@render chip(node)}
 				{#if node.children.length > 0 || node.child_count > 0}
 					{@render branch(node.children, true, node)}
@@ -72,24 +78,39 @@
 		{#if parent}
 			{@const hidden = parent.child_count - Math.min(parent.children.length, MAX_CHILDREN_SHOWN)}
 			{#if hidden > 0}
-				<li class="relative min-w-0 {lineClass}">
+				<li class="relative min-w-0 {moreLine}">
 					<a href="/storages/{parent.id}" class="text-primary text-xs hover:underline">+{hidden} more →</a>
 				</li>
 			{/if}
+		{:else if nodes.length > MAX_CHILDREN_SHOWN}
+			<!-- More root storages than fit: the roots list is complete (the API
+			     returns every root), so the rest live on the full Storage page. -->
+			<li class="min-w-0">
+				<a href="/storages" class="text-primary text-xs hover:underline">
+					+{nodes.length - MAX_CHILDREN_SHOWN} more →
+				</a>
+			</li>
 		{/if}
 	</ul>
 {/snippet}
 
-{#if loading}
-	<p class="text-muted-foreground text-sm">Loading…</p>
-{:else if error}
-	<p class="text-destructive text-sm">{error}</p>
-{:else if roots.length > 0}
-	<Card.Root variant="glass" class="p-3">
-		<Card.Content class="p-0">
-			<nav aria-label="Storage map">
-				{@render branch(roots, false)}
-			</nav>
-		</Card.Content>
-	</Card.Root>
+<!-- The heading lives here (not in the dashboard) so an empty install shows
+     no orphaned "Storage map" title over nothing. -->
+{#if loading || error || roots.length > 0}
+	<div class="mt-2 flex flex-col gap-2">
+		<h2 class="text-muted-foreground text-sm font-medium">Storage map</h2>
+		{#if loading}
+			<p class="text-muted-foreground text-sm">Loading…</p>
+		{:else if error}
+			<p class="text-destructive text-sm">{error}</p>
+		{:else}
+			<Card.Root variant="glass" class="p-3">
+				<Card.Content class="p-0">
+					<nav aria-label="Storage map">
+						{@render branch(roots, false)}
+					</nav>
+				</Card.Content>
+			</Card.Root>
+		{/if}
+	</div>
 {/if}

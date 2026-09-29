@@ -771,7 +771,8 @@ func TestStorageTreeDepthCapChildCountsAndOrder(t *testing.T) {
 	b := mk("B", &root.ID, nil)
 	g := mk("G", &b.ID, nil)
 	gg := mk("GG", &g.ID, nil)
-	_ = mk("GGG", &gg.ID, nil)
+	ggg := mk("GGG", &gg.ID, nil)
+	_ = mk("GGGG", &ggg.ID, nil) // 6th level: must never appear, even at depth=99
 
 	// depth=3 -> R(1) > B(2) > G(3); G's child GG is cut but counted.
 	r := findTreeRoot(getStorageTree(t, pool, "?depth=3"), root.ID)
@@ -795,12 +796,23 @@ func TestStorageTreeDepthCapChildCountsAndOrder(t *testing.T) {
 		t.Fatalf("expected leaf Z to have child_count 0 and an empty (non-null) children array, got %+v", r.Children[1])
 	}
 
-	// depth=5 reaches the bottom of the chain; depth above the cap is clamped to it.
+	// depth=1 is roots only: R is there, its children cut but counted.
+	r1 := findTreeRoot(getStorageTree(t, pool, "?depth=1"), root.ID)
+	if r1 == nil || len(r1.Children) != 0 || r1.Children == nil || r1.ChildCount != 2 {
+		t.Fatalf("depth=1: expected R with no children but child_count 2, got %+v", r1)
+	}
+
+	// depth=5 reaches level 5 (GGG) and no further; depth above the cap
+	// (99) must clamp to the same 5 — the 6th-level GGGG never appears.
 	for _, qs := range []string{"?depth=5", "?depth=99"} {
 		r5 := findTreeRoot(getStorageTree(t, pool, qs), root.ID)
 		if r5 == nil || len(r5.Children[0].Children) != 1 || len(r5.Children[0].Children[0].Children) != 1 ||
 			len(r5.Children[0].Children[0].Children[0].Children) != 1 {
 			t.Fatalf("%s: expected all 5 levels present, got %+v", qs, r5)
+		}
+		ggg := r5.Children[0].Children[0].Children[0].Children[0]
+		if len(ggg.Children) != 0 || ggg.ChildCount != 1 {
+			t.Fatalf("%s: expected level 5 (GGG) cut with child_count 1 and no children, got %+v", qs, ggg)
 		}
 	}
 	// A root has no parent, so it must not be duplicated as a nested child anywhere.
