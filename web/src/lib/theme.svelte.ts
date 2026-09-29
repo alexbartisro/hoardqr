@@ -26,7 +26,9 @@ function apply(mode: ThemeMode) {
 }
 
 class Theme {
-	mode = $state<ThemeMode>('auto');
+	// Starts from the stored value (the app is SPA-only, so this always runs in
+	// a browser) so the header button's first frame isn't briefly wrong.
+	mode = $state<ThemeMode>(readStored());
 
 	/** Call once from the root layout's onMount. Returns a cleanup function. */
 	init(): () => void {
@@ -36,7 +38,17 @@ class Theme {
 		const mq = matchMedia('(prefers-color-scheme: dark)');
 		const onChange = () => this.mode === 'auto' && apply('auto');
 		mq.addEventListener('change', onChange);
-		return () => mq.removeEventListener('change', onChange);
+		// A change made in another tab: adopt it (without re-writing storage).
+		const onStorage = (e: StorageEvent) => {
+			if (e.key !== STORAGE_KEY) return;
+			this.mode = readStored();
+			apply(this.mode);
+		};
+		addEventListener('storage', onStorage);
+		return () => {
+			mq.removeEventListener('change', onChange);
+			removeEventListener('storage', onStorage);
+		};
 	}
 
 	set(mode: ThemeMode) {

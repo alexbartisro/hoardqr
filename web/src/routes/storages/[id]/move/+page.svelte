@@ -119,8 +119,8 @@
 		<p class="text-muted-foreground text-sm">Loading…</p>
 	{:else}
 		<div>
-			<h1 class="text-xl font-semibold">Move "{storage.name}"</h1>
-			<p class="text-muted-foreground text-sm">Currently in {currentPositionText}</p>
+			<h1 class="text-xl font-semibold break-words">Move "{storage.name}"</h1>
+			<p class="text-muted-foreground text-sm break-words">Currently in {currentPositionText}</p>
 		</div>
 
 		<Card.Root variant="glass" class="p-4">

@@ -47,3 +47,18 @@ func TestVersionHandlerCommitEmptyWhenUnstamped(t *testing.T) {
 		t.Fatalf("expected an empty commit, got %q", got.Commit)
 	}
 }
+
+// TestRouterServesVersion guards the wiring the handler-level tests can't:
+// that NewRouter actually mounts /api/version (and that it doesn't need a
+// database — the pool is nil here on purpose).
+func TestRouterServesVersion(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewRouter(nil, t.TempDir()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/version", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 from the router, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got VersionDTO
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil || got.Version == "" {
+		t.Fatalf("expected a JSON body with a version, got %q (err %v)", rec.Body.String(), err)
+	}
+}

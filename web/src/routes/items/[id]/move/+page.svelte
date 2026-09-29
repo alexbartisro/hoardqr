@@ -77,8 +77,8 @@
 		<p class="text-muted-foreground text-sm">Loading…</p>
 	{:else}
 		<div>
-			<h1 class="text-xl font-semibold">Move "{item.name}"</h1>
-			<p class="text-muted-foreground text-sm">Currently in {currentBreadcrumbText}</p>
+			<h1 class="text-xl font-semibold break-words">Move "{item.name}"</h1>
+			<p class="text-muted-foreground text-sm break-words">Currently in {currentBreadcrumbText}</p>
 		</div>
 
 		<Card.Root variant="glass" class="p-4">
