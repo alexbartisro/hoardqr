@@ -12,6 +12,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import PhotoUpload from '$lib/components/photo-upload.svelte';
 	import LocationSelect from '$lib/components/location-select.svelte';
+	import Plus from '@lucide/svelte/icons/plus';
 	import Printer from '@lucide/svelte/icons/printer';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import MoveIcon from '@lucide/svelte/icons/move';
@@ -330,7 +331,10 @@
 							</Button>
 						</div>
 					{:else}
-						<div class="grid grid-cols-4 gap-1">
+						<div class="grid grid-cols-5 gap-1">
+							<Button href="/items/new?storageId={storage.id}" class={actionClass}>
+								<Plus class="size-5" /> Add item
+							</Button>
 							<Button variant="ghost" href="/storages/{storage.id}/label" class={actionClass}>
 								<Printer class="size-5" /> Label
 							</Button>
