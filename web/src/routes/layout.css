@@ -7,38 +7,46 @@
 
 :root {
 	color-scheme: light;
-	--background: oklch(1 0 0);
-	--foreground: oklch(0.145 0 0);
+	/* Brand palette (2026-10-03, inspired by lmmendes/attic): blue primary
+	   (#315cf4 ≈ oklch 0.545 0.232 266), coral --highlight (#ff795b), and
+	   neutrals faintly tinted toward the brand hue instead of pure gray.
+	   --accent stays shadcn's neutral hover surface (hover:bg-accent on list
+	   rows), just tinted blue — the coral is a separate --highlight token so
+	   hovers don't turn coral. Every text/surface pair here is ≥ 4.5:1. */
+	--background: oklch(0.982 0.004 266);
+	--foreground: oklch(0.2 0.03 272);
 	--card: oklch(1 0 0);
-	--card-foreground: oklch(0.145 0 0);
+	--card-foreground: oklch(0.2 0.03 272);
 	--popover: oklch(1 0 0);
-	--popover-foreground: oklch(0.145 0 0);
-	--primary: oklch(0.205 0 0);
+	--popover-foreground: oklch(0.2 0.03 272);
+	--primary: oklch(0.545 0.232 266);
 	--primary-foreground: oklch(0.985 0 0);
-	--secondary: oklch(0.97 0 0);
-	--secondary-foreground: oklch(0.205 0 0);
-	--muted: oklch(0.97 0 0);
-	--muted-foreground: oklch(0.556 0 0);
-	--accent: oklch(0.97 0 0);
-	--accent-foreground: oklch(0.205 0 0);
+	--secondary: oklch(0.955 0.012 266);
+	--secondary-foreground: oklch(0.28 0.04 270);
+	--muted: oklch(0.955 0.008 266);
+	--muted-foreground: oklch(0.52 0.025 272);
+	--accent: oklch(0.945 0.026 272);
+	--accent-foreground: oklch(0.42 0.19 266);
+	--highlight: oklch(0.728 0.17 34);
+	--highlight-foreground: oklch(0.22 0.06 34);
 	--destructive: oklch(0.577 0.245 27.325);
-	--border: oklch(0.922 0 0);
-	--input: oklch(0.922 0 0);
-	--ring: oklch(0.708 0 0);
-	--chart-1: oklch(0.87 0 0);
-	--chart-2: oklch(0.556 0 0);
-	--chart-3: oklch(0.439 0 0);
-	--chart-4: oklch(0.371 0 0);
-	--chart-5: oklch(0.269 0 0);
+	--border: oklch(0.915 0.012 266);
+	--input: oklch(0.915 0.012 266);
+	--ring: oklch(0.545 0.232 266);
+	--chart-1: oklch(0.545 0.232 266);
+	--chart-2: oklch(0.728 0.17 34);
+	--chart-3: oklch(0.69 0.163 271);
+	--chart-4: oklch(0.42 0.19 266);
+	--chart-5: oklch(0.8 0.1 273);
 	--radius: 0.625rem;
-	--sidebar: oklch(0.985 0 0);
-	--sidebar-foreground: oklch(0.145 0 0);
-	--sidebar-primary: oklch(0.205 0 0);
+	--sidebar: oklch(0.975 0.006 266);
+	--sidebar-foreground: oklch(0.2 0.03 272);
+	--sidebar-primary: oklch(0.545 0.232 266);
 	--sidebar-primary-foreground: oklch(0.985 0 0);
-	--sidebar-accent: oklch(0.97 0 0);
-	--sidebar-accent-foreground: oklch(0.205 0 0);
-	--sidebar-border: oklch(0.922 0 0);
-	--sidebar-ring: oklch(0.708 0 0);
+	--sidebar-accent: oklch(0.945 0.026 272);
+	--sidebar-accent-foreground: oklch(0.42 0.19 266);
+	--sidebar-border: oklch(0.915 0.012 266);
+	--sidebar-ring: oklch(0.545 0.232 266);
 }
 
 /* Theme: three user-selectable states (auto / light / dark) — reverses the
@@ -50,37 +58,42 @@
    components key off that one class. */
 .dark {
 	color-scheme: dark;
-	--background: oklch(0.145 0 0);
-	--foreground: oklch(0.985 0 0);
-	--card: oklch(0.205 0 0);
-	--card-foreground: oklch(0.985 0 0);
-	--popover: oklch(0.205 0 0);
-	--popover-foreground: oklch(0.985 0 0);
-	--primary: oklch(0.922 0 0);
-	--primary-foreground: oklch(0.205 0 0);
-	--secondary: oklch(0.269 0 0);
-	--secondary-foreground: oklch(0.985 0 0);
-	--muted: oklch(0.269 0 0);
-	--muted-foreground: oklch(0.708 0 0);
-	--accent: oklch(0.269 0 0);
-	--accent-foreground: oklch(0.985 0 0);
+	/* One blue can't be both ≥ 4.5:1 link text on a dark card and ≥ 4.5:1
+	   behind white button text, so dark mode uses a lighter blue with dark
+	   text on primary buttons/chips (shadcn's usual dark pattern). */
+	--background: oklch(0.18 0.02 272);
+	--foreground: oklch(0.97 0.005 266);
+	--card: oklch(0.235 0.022 272);
+	--card-foreground: oklch(0.97 0.005 266);
+	--popover: oklch(0.235 0.022 272);
+	--popover-foreground: oklch(0.97 0.005 266);
+	--primary: oklch(0.7 0.15 270);
+	--primary-foreground: oklch(0.18 0.02 272);
+	--secondary: oklch(0.29 0.022 272);
+	--secondary-foreground: oklch(0.97 0.005 266);
+	--muted: oklch(0.29 0.022 272);
+	--muted-foreground: oklch(0.72 0.02 270);
+	--accent: oklch(0.31 0.04 270);
+	--accent-foreground: oklch(0.97 0.005 266);
+	--highlight: oklch(0.728 0.17 34);
+	--highlight-foreground: oklch(0.18 0.02 272);
 	--destructive: oklch(0.704 0.191 22.216);
 	--border: oklch(1 0 0 / 10%);
 	--input: oklch(1 0 0 / 15%);
-	--ring: oklch(0.556 0 0);
-	--chart-1: oklch(0.87 0 0);
-	--chart-2: oklch(0.556 0 0);
-	--chart-3: oklch(0.439 0 0);
-	--chart-4: oklch(0.371 0 0);
-	--chart-5: oklch(0.269 0 0);
-	--sidebar: oklch(0.205 0 0);
-	--sidebar-foreground: oklch(0.985 0 0);
-	--sidebar-primary: oklch(0.488 0.243 264.376);
-	--sidebar-primary-foreground: oklch(0.985 0 0);
-	--sidebar-accent: oklch(0.269 0 0);
-	--sidebar-accent-foreground: oklch(0.985 0 0);
+	--ring: oklch(0.7 0.15 270);
+	--chart-1: oklch(0.7 0.15 270);
+	--chart-2: oklch(0.728 0.17 34);
+	--chart-3: oklch(0.8 0.1 273);
+	--chart-4: oklch(0.545 0.232 266);
+	--chart-5: oklch(0.42 0.19 266);
+	--sidebar: oklch(0.235 0.022 272);
+	--sidebar-foreground: oklch(0.97 0.005 266);
+	--sidebar-primary: oklch(0.7 0.15 270);
+	--sidebar-primary-foreground: oklch(0.18 0.02 272);
+	--sidebar-accent: oklch(0.31 0.04 270);
+	--sidebar-accent-foreground: oklch(0.97 0.005 266);
 	--sidebar-border: oklch(1 0 0 / 10%);
-	--sidebar-ring: oklch(0.556 0 0);
+	--sidebar-ring: oklch(0.7 0.15 270);
 }
 
 @theme inline {
@@ -104,6 +117,8 @@
 	--color-destructive: var(--destructive);
 	--color-accent-foreground: var(--accent-foreground);
 	--color-accent: var(--accent);
+	--color-highlight-foreground: var(--highlight-foreground);
+	--color-highlight: var(--highlight);
 	--color-muted-foreground: var(--muted-foreground);
 	--color-muted: var(--muted);
 	--color-secondary-foreground: var(--secondary-foreground);
@@ -133,7 +148,7 @@
 		@apply bg-background text-foreground;
 		background-image:
 			radial-gradient(circle at 15% 10%, color-mix(in oklch, var(--primary) 12%, transparent), transparent 45%),
-			radial-gradient(circle at 85% 90%, color-mix(in oklch, var(--accent) 30%, transparent), transparent 45%);
+			radial-gradient(circle at 85% 90%, color-mix(in oklch, var(--highlight) 12%, transparent), transparent 45%);
 		background-attachment: fixed;
 	}
 	@media print {
