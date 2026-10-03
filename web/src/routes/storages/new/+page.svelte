@@ -80,7 +80,7 @@
 </script>
 
 <div class="flex flex-col gap-6">
-	<h1 class="text-xl font-semibold">Add Storage</h1>
+	<h1 class="text-xl font-bold">Add Storage</h1>
 
 	<Card.Root variant="glass" class="p-4">
 		<StoragePicker bind:storageId={parentId} bind:breadcrumb optional />

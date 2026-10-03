@@ -26,7 +26,7 @@
 </script>
 
 <div class="flex flex-col items-center gap-4">
-	<h1 class="text-xl font-semibold print:hidden">Print Label</h1>
+	<h1 class="text-xl font-bold print:hidden">Print Label</h1>
 
 	{#if loadError}
 		<p class="text-destructive text-sm">{loadError}</p>

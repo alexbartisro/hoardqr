@@ -306,7 +306,7 @@
 								{#if renameError}<p class="text-destructive text-xs">{renameError}</p>{/if}
 							</form>
 						{:else}
-							<h1 class="text-2xl leading-tight font-bold tracking-tight break-words">{storage.name}</h1>
+							<h1 class="text-2xl leading-tight font-extrabold tracking-tight break-words">{storage.name}</h1>
 						{/if}
 						{#if photoSaveError}<p class="text-destructive mt-1 text-xs">{photoSaveError}</p>{/if}
 					</div>

@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 @import "tw-animate-css";
 @import "shadcn-svelte/tailwind.css";
-@import "@fontsource-variable/inter";
+@import "@fontsource-variable/manrope";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -97,7 +97,7 @@
 }
 
 @theme inline {
-	--font-sans: 'Inter Variable', sans-serif;
+	--font-sans: 'Manrope Variable', sans-serif;
 	--color-sidebar-ring: var(--sidebar-ring);
 	--color-sidebar-border: var(--sidebar-border);
 	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -158,6 +158,17 @@
 	}
 	html {
 		@apply font-sans;
+	}
+	/* Manrope reads best slightly tightened (as in lmmendes/attic), headings
+	   more so. Base-layer only, so an explicit tracking-* utility (e.g. the
+	   uppercase `tracking-wide` section labels) still wins. */
+	body {
+		letter-spacing: -0.01em;
+	}
+	h1,
+	h2,
+	h3 {
+		letter-spacing: -0.02em;
 	}
 }
 

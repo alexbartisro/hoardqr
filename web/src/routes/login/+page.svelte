@@ -31,7 +31,7 @@
 </script>
 
 <div class="mx-auto flex max-w-sm flex-col gap-6">
-	<h1 class="text-center text-xl font-semibold">HoardQR</h1>
+	<h1 class="text-center text-xl font-bold">HoardQR</h1>
 
 	<Card.Root variant="glass" class="p-4">
 		<Card.Content class="p-0">

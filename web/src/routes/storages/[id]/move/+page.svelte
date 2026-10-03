@@ -119,7 +119,7 @@
 		<p class="text-muted-foreground text-sm">Loading…</p>
 	{:else}
 		<div>
-			<h1 class="text-xl font-semibold break-words">Move "{storage.name}"</h1>
+			<h1 class="text-xl font-bold break-words">Move "{storage.name}"</h1>
 			<p class="text-muted-foreground text-sm break-words">Currently in {currentPositionText}</p>
 		</div>
 

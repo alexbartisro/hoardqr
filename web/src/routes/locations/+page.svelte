@@ -122,7 +122,7 @@
 </script>
 
 <div class="flex flex-col gap-4">
-	<h1 class="text-xl font-semibold">Locations</h1>
+	<h1 class="text-xl font-bold">Locations</h1>
 	<p class="text-muted-foreground text-sm">
 		Physical properties (a house, garage, etc.) that a root-level storage can optionally belong to.
 	</p>

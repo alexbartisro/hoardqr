@@ -129,7 +129,7 @@
 </script>
 
 <div class="flex flex-col gap-4">
-	<h1 class="text-xl font-semibold">Scan</h1>
+	<h1 class="text-xl font-bold">Scan</h1>
 
 	<Tabs.Root value={tab} onValueChange={(v) => switchTab(v as typeof tab)}>
 		<Tabs.List>

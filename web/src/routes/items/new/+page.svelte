@@ -148,7 +148,7 @@
 </script>
 
 <div class="flex flex-col gap-6">
-	<h1 class="text-xl font-semibold">Add Item</h1>
+	<h1 class="text-xl font-bold">Add Item</h1>
 
 	<Card.Root variant="glass" class="p-4">
 		<Card.Content class="flex flex-col gap-3 p-0">

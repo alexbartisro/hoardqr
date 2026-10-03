@@ -77,7 +77,7 @@
 
 <div class="flex flex-col gap-4">
 	<div class="flex items-center justify-between gap-2">
-		<h1 class="text-xl font-semibold">Items</h1>
+		<h1 class="text-xl font-bold">Items</h1>
 		<Button size="sm" href="/items/new">+ Add Item</Button>
 	</div>
 
